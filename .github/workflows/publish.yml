@@ -21,7 +21,7 @@ jobs:
 
       - name: Build project
         run: |
-          yarn install --immutable-cache --check-cache && \
+          yarn install --immutable && \
           yarn build
       - name: Create Release
         id: create_release
