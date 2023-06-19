@@ -1,4 +1,9 @@
-import { HeadObjectCommand, S3, LifecycleRule  } from '@aws-sdk/client-s3';
+import {
+  HeadObjectCommand,
+  S3,
+  LifecycleRule,
+  DeleteObjectCommand,
+} from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { MessageName, Report } from '@yarnpkg/core';
 import * as tar from 'tar';
@@ -42,6 +47,12 @@ function splitToEqualChunks(arr: Array<File>, chunksCount: number) {
   }
 
   return chunks.filter((chunk) => chunk.items.length > 0);
+}
+
+  
+function deleteNotReferenced(config: Config,) {
+  const metadataStorage = new MetadataStorage(config);
+  
 }
 
 export async function upload(
@@ -120,31 +131,21 @@ export async function upload(
             new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
           );
 
-          if (!head.ContentLength ) {
-            report.reportWarning(MessageName.UNNAMED, `No ContentLength for ${key}`)
+          if (!head.ContentLength) {
+            report.reportWarning(
+              MessageName.UNNAMED,
+              `No ContentLength for ${key}`,
+            );
           }
           return { key, size: head.ContentLength ?? 0 };
         }),
       );
       const metadataStorage = new MetadataStorage(config);
-      //   const oldMetadata = await metadataStorage.get();
       await metadataStorage.save({
         allFiles,
         uploaded,
       });
+      
     },
   );
-
-  //   if (oldMetadata) { //cant remove, it could be downloading now
-  //     await Promise.all(
-  //       oldMetadata.allKeys.map(async (key) => {
-  //         await client.send(
-  //           new DeleteObjectCommand({
-  //             Bucket: config.bucket,
-  //             Key: key,
-  //           }),
-  //         );
-  //       }),
-  //     );
-  //   }
 }
