@@ -9,9 +9,11 @@ Usage:
 2) in `.yarnrc.yml`:
 ```yaml
 s3CacheConfig:
-  bucket: "yarn-s3-cache" # default
-  chunkCount: 10 # default
+  bucket: "yarn-s3-cache" # optional, default
+  chunkCount: 10 # optional
   region: "us-east-1" # default is null, which enables default resolution
+  filepath: "/aws/creds" # optional
+  profile: "default" # optional
 ```
 
 How credentials are resolved: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/modules/_aws_sdk_credential_provider_node.html
