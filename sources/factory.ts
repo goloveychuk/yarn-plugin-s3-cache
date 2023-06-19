@@ -73,10 +73,10 @@ interface Options {
 type GetOptions = (input: ConfigurationValueMap['s3CacheConfig']) => Options;
 
 const defaultGetOptions: GetOptions = (configInput) => {
-  //@ts-ignore
-  if (global.S3_GET_OPTIONS) {
-    //@ts-ignore
-    return global.S3_GET_OPTIONS;
+  //@ts-expect-error
+  if (typeof GET_S3_CACHE_OPTIONS === 'function') {
+    //@ts-expect-error
+    return GET_S3_CACHE_OPTIONS(configInput);
   }
   return {
     region: configInput.get('region'),

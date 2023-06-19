@@ -119,7 +119,7 @@ async function bundle() {
         `//prettier-ignore`,
         `module.exports = {`,
         `name: ${JSON.stringify(name)},`,
-        `factory: function (require) {`,
+        `factory: function (require, GET_S3_CACHE_OPTIONS) {`,
       ].join(`\n`),
     },
     globalName: `plugin`,
