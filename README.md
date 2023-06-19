@@ -19,3 +19,44 @@ s3CacheConfig:
 How credentials are resolved: https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/modules/_aws_sdk_credential_provider_node.html
 
 How region is resolved, if not provided: https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-region.html
+
+## Programmic usage: 
+
+```js
+
+const origPlugin = require("./plugin-s3-cache.js");
+
+const customGetOptions = (opts) => {
+  const isCI = require("is-ci");
+
+  let shouldFetch = false;
+  let shouldUpload = false;
+
+  if (isCI) {
+    const { getBuildInfo } = require("ci-build-info");
+    const buildInfo = getBuildInfo();
+    const isMaster = ["refs/heads/master", "master"].includes(
+      buildInfo.v2.vcs.branch
+    );
+    shouldFetch = !isMaster;
+    shouldUpload = isMaster;
+  }
+
+  return {
+    shouldFetch,
+    shouldUpload,
+    chunkCount: 10,
+    region: "us-east-1",
+    bucket: "yarn-s3-cache",
+    profile: "automation-aws",
+  };
+};
+
+module.exports = {
+  ...origPlugin,
+  factory: (require) => {
+    return origPlugin.factory(require, customGetOptions);
+  },
+};
+
+```
