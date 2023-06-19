@@ -54,6 +54,8 @@ declare module '@yarnpkg/core' {
       bucket: string;
       chunkCount: number;
       region: string | null;
+      profile: string | null;
+      filepath: string | null
     }>;
   }
 }
@@ -63,6 +65,8 @@ interface Options {
   shouldUpload: boolean;
   bucket: string;
   chunkCount: number;
+  profile: string | undefined;
+  filepath: string | undefined
   region: string | null;
 }
 
@@ -76,11 +80,12 @@ const defaultGetOptions: GetOptions = (configInput) => {
   }
   return {
     region: configInput.get('region'),
+    profile: configInput.get('profile'),
     shouldFetch: process.env.S3_CACHE_SHOULD_FETCH === 'true',
     shouldUpload: process.env.S3_CACHE_SHOULD_UPLOAD === 'true',
     bucket: configInput.get('bucket'),
     chunkCount: configInput.get('chunkCount'),
-  };
+    filepath: configInput.get('filepath')
 };
 
 export default (getOptions: GetOptions = defaultGetOptions): Plugin<Hooks> => ({
@@ -101,6 +106,18 @@ export default (getOptions: GetOptions = defaultGetOptions): Plugin<Hooks> => ({
         },
         region: {
           description: `aws region`,
+          isNullable: true,
+          default: null,
+          type: SettingsType.STRING,
+        },
+        profile: {
+          description: `aws profile`,
+          isNullable: true,
+          default: null,
+          type: SettingsType.STRING,
+        },
+        filepath: {
+          description: `aws creds file path`,
           isNullable: true,
           default: null,
           type: SettingsType.STRING,
@@ -137,7 +154,7 @@ export default (getOptions: GetOptions = defaultGetOptions): Plugin<Hooks> => ({
           bucket: options.bucket,
           chunkCount: options.chunkCount,
           s3Config: {
-            credentials: defaultProvider(), // env vars used https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/modules/_aws_sdk_credential_provider_node.html
+            credentials: defaultProvider({ profile: options.profile, filepath: options.filepath }), // env vars used https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/modules/_aws_sdk_credential_provider_node.html
             region: options.region || undefined, //undefined to use default resolution: https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-region.html
           },
           archivesDir,
