@@ -3,7 +3,7 @@ import { Worker } from 'worker_threads';
 import { Config, DownloadWorkerData, MetadataStorage, throttle } from './common';
 //@ts-expect-error
 import workerCode from './download.worker.js';
-import { Report } from '@yarnpkg/core';
+import { MessageName, Report } from '@yarnpkg/core';
 
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) {
@@ -18,7 +18,7 @@ export async function download(config: Config, report: Report) {
 
   const metadata = await metadataStorage.get();
   if (!metadata) {
-    console.warn('No metadata');
+    report.reportWarning(MessageName.UNNAMED, 'No metadata, should upload first');
     return;
   }
 

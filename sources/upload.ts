@@ -1,6 +1,6 @@
-import { HeadObjectCommand, S3 } from '@aws-sdk/client-s3';
+import { HeadObjectCommand, S3, LifecycleRule  } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
-import { Report } from '@yarnpkg/core';
+import { MessageName, Report } from '@yarnpkg/core';
 import * as tar from 'tar';
 import { PassThrough } from 'stream';
 import * as fs from 'fs';
@@ -121,7 +121,7 @@ export async function upload(
           );
 
           if (!head.ContentLength ) {
-            console.warn(`No ContentLength for ${key}`)
+            report.reportWarning(MessageName.UNNAMED, `No ContentLength for ${key}`)
           }
           return { key, size: head.ContentLength ?? 0 };
         }),
