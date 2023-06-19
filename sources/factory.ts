@@ -69,6 +69,11 @@ interface Options {
 type GetOptions = (input: ConfigurationValueMap['s3CacheConfig']) => Options;
 
 const defaultGetOptions: GetOptions = (configInput) => {
+  //@ts-ignore
+  if (global.S3_GET_OPTIONS) {
+    //@ts-ignore
+    return global.S3_GET_OPTIONS;
+  }
   return {
     region: configInput.get('region'),
     shouldFetch: process.env.S3_CACHE_SHOULD_FETCH === 'true',
