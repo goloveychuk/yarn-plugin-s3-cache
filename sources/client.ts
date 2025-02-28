@@ -2,6 +2,9 @@ import fetch from 'node-fetch';
 import { Agent } from 'http';
 import { ChildProcess, spawn } from 'child_process';
 import { setInterval } from 'timers/promises'
+import * as path from 'path'
+import * as os from 'os'
+import * as fs from 'fs'
 
 interface RpcPayload {
     jsonrpc: string;
@@ -19,18 +22,21 @@ interface RpcResponse<T> {
 export class Client {
     private lastId = 1
     private child?: ChildProcess
-    private pipePath = '/tmp/s3_rpc.sock'
+    private pipePath: string
+    private agent: Agent
     constructor(private execPath: string) {
-
+        this.pipePath = path.join(os.tmpdir(), `s3-cache-${Date.now()}.sock`);
+        this.agent = new Agent({ socketPath: this.pipePath } as any);
     }
-    agent = new Agent({ socketPath: this.pipePath } as any);
 
     async start() {
-        const child = spawn(this.execPath, [JSON.stringify({
+        const conf = {
             socketPath: this.pipePath,
             maxDownloadConcurrency: 500,
             maxUploadConcurrency: 500,
-        })], { stdio: 'inherit' })
+        }
+
+        const child = spawn(this.execPath, [], { stdio: 'inherit', env: { CONFIG: JSON.stringify(conf) } })
         this.child = child
 
         return new Promise<void>((resolve, reject) => {
@@ -56,6 +62,7 @@ export class Client {
     }
     async stop() {
         this.child?.kill()
+        fs.unlinkSync(this.pipePath)
     }
 
     private async rpcCall<T extends any[], R>(method: string, ...params: T): Promise<RpcResponse<R>> {
@@ -66,8 +73,6 @@ export class Client {
             params,
             id,
         };
-
-
         try {
             // The URL here is arbitrary; the agent directs the connection to the Unix socket.
             const response = await fetch('http://unix/rpc', {

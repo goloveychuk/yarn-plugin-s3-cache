@@ -163,12 +163,14 @@ type Config struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatalf("missing configuration argument")
-	}
 
 	var cfg Config
-	if err := json.Unmarshal([]byte(os.Args[1]), &cfg); err != nil {
+	configData := os.Getenv("CONFIG")
+	if configData == "" {
+		log.Fatalf("CONFIG environment variable is not set")
+	}
+
+	if err := json.Unmarshal([]byte(configData), &cfg); err != nil {
 		log.Fatalf("failed to parse configuration: %v", err)
 	}
 
