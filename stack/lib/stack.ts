@@ -9,6 +9,7 @@ export class PnpCacheStack extends cdk.Stack {
 
     const bucket = new s3.Bucket(this, 'pnp-cache-poc', {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
+      autoDeleteObjects: true,
       lifecycleRules: [{ enabled: true, expiration: cdk.Duration.days(5) }],
     });
 
