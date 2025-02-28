@@ -18,31 +18,48 @@ interface RpcResponse<T> {
     error: string | null;
     id: number;
 }
+export interface Config {
+    maxDownloadConcurrency?: number;
+    maxUploadConcurrency?: number;
+    awsRegion: string;
+    awsAccessKeyId: string;
+    awsSecretAccessKey: string;
+}
 
 export class Client {
     private lastId = 1
     private child?: ChildProcess
     private pipePath: string
     private agent: Agent
-    constructor(private execPath: string) {
+    constructor(private execPath: string, private config: Config) {
         this.pipePath = path.join(os.tmpdir(), `s3-cache-${Date.now()}.sock`);
         this.agent = new Agent({ socketPath: this.pipePath } as any);
     }
 
     async start() {
         const conf = {
-            socketPath: this.pipePath,
             maxDownloadConcurrency: 500,
             maxUploadConcurrency: 500,
+            ...this.config,
+            socketPath: this.pipePath,
         }
 
         const child = spawn(this.execPath, [], { stdio: 'inherit', env: { CONFIG: JSON.stringify(conf) } })
         this.child = child
 
         return new Promise<void>((resolve, reject) => {
+            let stopped = false
+            child.on('exit', (code) => {
+                this.stop()
+                stopped = true
+                reject(new Error(`child process exited with code ${code}`))
+            })
             child.on('spawn', async () => {
                 const startTime = Date.now()
                 for await (const _ of setInterval(100)) {
+                    if (stopped) {
+                        return
+                    }
                     if (startTime - Date.now() > 5000) {
                         reject(new Error('timeout'))
                     }
@@ -62,7 +79,11 @@ export class Client {
     }
     async stop() {
         this.child?.kill()
-        fs.unlinkSync(this.pipePath)
+        try {
+            fs.unlinkSync(this.pipePath)
+        } catch (e) {
+
+        }
     }
 
     private async rpcCall<T extends any[], R>(method: string, ...params: T): Promise<RpcResponse<R>> {

@@ -15,6 +15,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gorilla/rpc"
 	gorillajson "github.com/gorilla/rpc/json"
@@ -160,6 +161,9 @@ type Config struct {
 	SocketPath             string `json:"socketPath"`
 	MaxDownloadConcurrency int    `json:"maxDownloadConcurrency"`
 	MaxUploadConcurrency   int    `json:"maxUploadConcurrency"`
+	AWSRegion              string `json:"awsRegion"`
+	AWSAccessKeyID         string `json:"awsAccessKeyId"`
+	AWSSecretAccessKey     string `json:"awsSecretAccessKey"`
 }
 
 func main() {
@@ -174,10 +178,17 @@ func main() {
 		log.Fatalf("failed to parse configuration: %v", err)
 	}
 
+	if (cfg.MaxDownloadConcurrency <= 0) || (cfg.MaxUploadConcurrency <= 0) || (cfg.AWSRegion == "") || (cfg.AWSAccessKeyID == "") || (cfg.AWSSecretAccessKey == "") {
+		log.Fatalf("invalid configuration")
+	}
+
 	ctx := context.Background()
 
-	// Load AWS configuration (using the default credential chain).
-	awsCfg, err := config.LoadDefaultConfig(ctx)
+	// Load AWS configuration using provided credentials and region.
+	awsCfg, err := config.LoadDefaultConfig(ctx,
+		config.WithRegion(cfg.AWSRegion),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AWSAccessKeyID, cfg.AWSSecretAccessKey, "")),
+	)
 	if err != nil {
 		log.Fatalf("failed to load AWS config: %v", err)
 	}

@@ -1,6 +1,9 @@
 {
   "name": "yarn-plugin-s3-cache",
   "main": "./sources/index.ts",
+  "workspaces": [
+    "stack"
+  ],
   "dependencies": {
     "@types/node": "^18.0.0",
     "@yarnpkg/builder": "^4.0.0",

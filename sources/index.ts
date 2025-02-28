@@ -171,12 +171,16 @@ const plugin: Plugin<Hooks> = {
 
         const execPath = path.join(__dirname, getExecFileName())
 
-        const client = new Client(execPath)
+        const client = new Client(execPath, {
+          awsAccessKeyId: 'minioadmin',
+          awsRegion: 'us-east-1',
+          awsSecretAccessKey: 'minioadmin',
+        })
         await  client.start()
 
         let pr = []
         for (const f of files) {
-          pr.push(client.downloadFile(f))
+          pr.push(client.downloadFile(f).then(console.log))
         }
         await Promise.all(pr)
 
