@@ -2,23 +2,17 @@
   "name": "yarn-plugin-s3-cache",
   "main": "./sources/index.ts",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.345.0",
-    "@aws-sdk/credential-provider-node": "^3.345.0",
-    "@aws-sdk/lib-storage": "^3.345.0",
-    "@types/node": "^16.0.0",
-    "@yarnpkg/builder": "^4.0.0-rc.25",
-    "@yarnpkg/cli": "^4.0.0-rc.25",
-    "@yarnpkg/core": "^4.0.0-rc.25",
-    "@yarnpkg/fslib": "^3.0.0-rc.25",
-    "clipanion": "^3.2.0-rc.10",
-    "tar": "6.1.15",
-    "typescript": "4.9.1-beta"
-  },
-  "devDependencies": {
-    "@types/tar": "^6.0.0"
+    "@types/node": "^18.0.0",
+    "@yarnpkg/builder": "^4.0.0",
+    "@yarnpkg/cli": "^4.0.0",
+    "@yarnpkg/core": "^4.0.0",
+    "execa": "^8.0.1",
+    "typescript": "^5.0.0"
   },
   "scripts": {
-    "build": "yarn tsc && node dist/bundle.js"
+    "build": "node build-helper.mjs && tsc --noEmit && builder build plugin",
+    "dev": "DEVELOPMENT=true node build-helper.mjs && builder build plugin --no-minify --source-map",
+    "test": "cd example && yarn install && yarn test"
   },
-  "packageManager": "yarn@3.2.4"
+  "packageManager": "yarn@4.1.0"
 }
