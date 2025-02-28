@@ -1,5 +1,5 @@
 node_modules
-.yarn/cache
+**/.yarn/cache
 install-state.gz
 bundles
 dist

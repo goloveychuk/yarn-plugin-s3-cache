@@ -33,7 +33,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           path: bundles/@yarnpkg/*
-          name: artifact.zip
+          name: artifact
 
       - uses: actions/attest-build-provenance@v2
         with:

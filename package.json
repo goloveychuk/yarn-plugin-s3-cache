@@ -15,5 +15,5 @@
     "dev": "DEVELOPMENT=true node build-helper.mjs && builder build plugin --no-minify --source-map",
     "test": "cd example && yarn install && yarn test"
   },
-  "packageManager": "yarn@4.1.0"
+  "packageManager": "yarn@4.6.0"
 }
