@@ -5,11 +5,16 @@ permissions:
   attestations: write
 
 # on: push
-on:
-  push:
-    branches: [ "master" ] 
+# on:
+#   push:
+    # branches: [ "master" ] 
   # pull_request:
   #   branches: [ "master" ] #todo
+on:
+  workflow_run:
+    workflows: [Run Tests]
+    types:
+      - completed
 
 jobs:
   build:
@@ -22,7 +27,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22.14.0
-          
+
       - name: Enable Corepack
         run: corepack enable
 
