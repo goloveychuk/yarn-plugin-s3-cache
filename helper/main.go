@@ -115,6 +115,7 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 
 	computed := hex.EncodeToString(hasher.Sum(nil))
 	if computed != req.Checksum {
+		defer os.Remove(req.OutputPath)
 		return fmt.Errorf("checksum mismatch: expected %s, got %s", req.Checksum, computed)
 	}
 

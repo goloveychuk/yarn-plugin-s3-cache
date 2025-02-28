@@ -163,22 +163,26 @@ const plugin: Plugin<Hooks> = {
           const outputFile = opts.cache.getLocatorPath(pkg, checksum);
           const basename = path.basename(outputFile);
           files.push({
-            s3Path: `s3://bucket/${basename}`,
+            s3Path: `s3://fdsfsadfksakjdfjklasdjklfsajkldsfsd/${basename}`,
             checksum: splitChecksumComponents(checksum).hash,
             outputPath: opts.cache.getLocatorPath(pkg, checksum),
           })
         }
-        const input: FetchInput = {
-          maxConcurrency: 500,
-          files
-        }
+
         const execPath = path.join(__dirname, getExecFileName())
 
         const client = new Client(execPath)
         await  client.start()
-        await client.downloadFile({checksum: 'asd', outputPath: 'asd', s3Path: 'asd'})
+
+        let pr = []
+        for (const f of files) {
+          pr.push(client.downloadFile(f))
+        }
+        await Promise.all(pr)
+
 
         await origFetch(opts)
+        await client.stop()
         //   const options = getOptions(project.configuration.get('s3CacheConfig'));
 
         //   if (!options.shouldFetch && !options.shouldUpload) {
