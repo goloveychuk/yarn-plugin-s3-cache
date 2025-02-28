@@ -13,6 +13,7 @@ import {spawnSync} from 'child_process'
 import {Readable} from 'stream'
 //@ts-expect-error
 import {getExecFileName} from '../utils.mjs'
+import { Client } from './client';
 interface File {
   s3Path: string;
   checksum: string
@@ -171,10 +172,11 @@ const plugin: Plugin<Hooks> = {
           maxConcurrency: 500,
           files
         }
-        const execPath = getExecFileName()
+        const execPath = path.join(__dirname, getExecFileName())
 
-        const result = spawnSync(path.join(__dirname, execPath), ["fetch"], {input: JSON.stringify(input), encoding: 'utf-8'})
-        console.log(result)
+        const client = new Client(execPath)
+        await  client.start()
+        await client.downloadFile({checksum: 'asd', outputPath: 'asd', s3Path: 'asd'})
 
         await origFetch(opts)
         //   const options = getOptions(project.configuration.get('s3CacheConfig'));

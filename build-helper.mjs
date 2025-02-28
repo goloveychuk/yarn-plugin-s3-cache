@@ -22,9 +22,9 @@ function getReleaseUrl() {
   return `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/releases/download/${tag}/`
 }
 
-
-const projectDir = path.join(process.cwd(), 'helper');
-const outputDir = path.join(projectDir, 'output');
+const root = path.join(process.cwd());
+const projectDir = path.join(root, 'helper');
+const outputDir = path.join(root, 'bundles/@yarnpkg');
 
 
 let PREFIX = getReleaseUrl();
@@ -36,7 +36,7 @@ if (!PREFIX || dev) {
 const build = async (conf) => {
   const [platform, arch] = conf;
   const name = `helper-${platform}-${arch}`;
-  const outFile = path.join(projectDir, `output/${name}`);
+  const outFile = path.join(outputDir, `${name}`);
   await execa('go', ['build', '-ldflags', "-w -s", '-o', outFile, ], {
     cwd: projectDir,
     stdio: 'inherit',

@@ -5,44 +5,58 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"strings"
-	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/gorilla/rpc"
+	gorillajson "github.com/gorilla/rpc/json"
 )
 
-// Config represents the structure of the JSON configuration file.
-type Config struct {
-	MaxConcurrency int      `json:"maxConcurrency"`
-	Auth           S3Auth   `json:"auth"`
-	Files          []S3File `json:"files"`
+// S3Service provides RPC methods to download and upload files.
+type S3Service struct {
+	client      *s3.Client
+	downloadSem chan struct{}
+	uploadSem   chan struct{}
 }
 
-// S3Auth holds S3 authentication data.
-type S3Auth struct {
-	Method       string `json:"method"` // e.g. "explicit" or "default"
-	AccessKey    string `json:"accessKey,omitempty"`
-	SecretKey    string `json:"secretKey,omitempty"`
-	SessionToken string `json:"sessionToken,omitempty"`
-	Region       string `json:"region,omitempty"`
+// DownloadRequest is the input for the Download method.
+type DownloadRequest struct {
+	S3Path     string `json:"s3Path"`     // e.g. "s3://bucket/key"
+	OutputPath string `json:"outputPath"` // local file path to save the object
+	Checksum   string `json:"checksum"`   // expected SHA-512 checksum (hex encoded)
 }
 
-// S3File describes a file to download.
-type S3File struct {
-	S3Path     string `json:"s3Path"`
-	Checksum   string `json:"checksum"`
-	OutputPath string `json:"outputPath"`
+// DownloadResponse is the output from the Download method.
+type DownloadResponse struct {
+	Message string `json:"message"`
 }
 
-// parseS3Path splits an S3 URL (s3://bucket/key) into its bucket and key.
+// UploadRequest is the input for the Upload method.
+type UploadRequest struct {
+	S3Path    string `json:"s3Path"`    // e.g. "s3://bucket/key"
+	InputPath string `json:"inputPath"` // local file path to read from
+}
+
+// UploadResponse is the output from the Upload method.
+type UploadResponse struct {
+	Message string `json:"message"`
+}
+type PingRequest struct {
+}
+
+type PingResponse struct {
+	Message string `json:"message"`
+}
+
+// parseS3Path splits an S3 URL (s3://bucket/key) into bucket and key.
 func parseS3Path(s3Path string) (bucket, key string, err error) {
 	if !strings.HasPrefix(s3Path, "s3://") {
 		return "", "", fmt.Errorf("invalid s3 path: %s", s3Path)
@@ -55,133 +69,140 @@ func parseS3Path(s3Path string) (bucket, key string, err error) {
 	return parts[0], parts[1], nil
 }
 
-// downloadAndValidate downloads an S3 object, writes it to disk, and validates its SHA‑512 checksum.
-func downloadAndValidate(ctx context.Context, client *s3.Client, file S3File) error {
-	bucket, key, err := parseS3Path(file.S3Path)
-	if err != nil {
-		return fmt.Errorf("failed to parse s3 path: %w", err)
-	}
-
-	// Request the object from S3.
-	input := &s3.GetObjectInput{
-		Bucket: &bucket,
-		Key:    &key,
-	}
-	resp, err := client.GetObject(ctx, input)
-	if err != nil {
-		return fmt.Errorf("failed to get object from s3: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Create (or overwrite) the output file.
-	outFile, err := os.Create(file.OutputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %w", err)
-	}
-	defer outFile.Close()
-
-	// Set up the SHA‑512 hasher.
-	hasher := sha512.New()
-
-	// Write to both the file and the hasher concurrently.
-	writer := io.MultiWriter(outFile, hasher)
-
-	// Stream data from S3 to the file and hash it.
-	if _, err := io.Copy(writer, resp.Body); err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
-	}
-
-	// Compare computed checksum with expected checksum.
-	computedHash := hex.EncodeToString(hasher.Sum(nil))
-	if computedHash != file.Checksum {
-		defer os.Remove(file.OutputPath)
-		return fmt.Errorf("checksum mismatch for %s: expected %s, got %s", file.S3Path, file.Checksum, computedHash)
-	}
-
-	log.Printf("Successfully downloaded and verified: %s", file.S3Path)
+func (s *S3Service) Ping(r *http.Request, req *PingRequest, resp *PingResponse) error {
+	resp.Message = "Pong"
 	return nil
 }
 
-func main() {
-	// Retrieve the path to the config file from the command line.
-	configPath := flag.String("config", "", "Path to JSON config file")
-	flag.Parse()
+// Download downloads an object from S3, streams it to a file while computing its checksum,
+// and returns an error if the computed checksum does not match the expected value.
+func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *DownloadResponse) error {
+	// Acquire a download slot.
+	s.downloadSem <- struct{}{}
+	defer func() { <-s.downloadSem }()
 
-	if *configPath == "" {
-		log.Fatal("config file path is required")
+	bucket, key, err := parseS3Path(req.S3Path)
+	if err != nil {
+		return err
 	}
 
-	// Open and decode the configuration file.
-	file, err := os.Open(*configPath)
+	ctx := context.Background()
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+	out, err := s.client.GetObject(ctx, input)
 	if err != nil {
-		log.Fatalf("failed to open config file: %v", err)
+		return fmt.Errorf("failed to get object: %w", err)
+	}
+	defer out.Body.Close()
+
+	// Create (or overwrite) the local file.
+	file, err := os.Create(req.OutputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
 	}
 	defer file.Close()
 
+	// Set up a SHA‑512 hasher.
+	hasher := sha512.New()
+
+	// Use MultiWriter to write data to both the file and the hasher.
+	writer := io.MultiWriter(file, hasher)
+	if _, err := io.Copy(writer, out.Body); err != nil {
+		return fmt.Errorf("failed to download file: %w", err)
+	}
+
+	computed := hex.EncodeToString(hasher.Sum(nil))
+	if computed != req.Checksum {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", req.Checksum, computed)
+	}
+
+	resp.Message = "Download successful"
+	return nil
+}
+
+// Upload reads a local file and uploads its contents to the specified S3 location.
+func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResponse) error {
+	// Acquire an upload slot.
+	s.uploadSem <- struct{}{}
+	defer func() { <-s.uploadSem }()
+
+	bucket, key, err := parseS3Path(req.S3Path)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Open(req.InputPath)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer file.Close()
+
+	ctx := context.Background()
+	input := &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   file,
+	}
+	_, err = s.client.PutObject(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to upload object: %w", err)
+	}
+
+	resp.Message = "Upload successful"
+	return nil
+}
+
+// Config holds the configuration values passed via JSON string.
+type Config struct {
+	SocketPath             string `json:"socketPath"`
+	MaxDownloadConcurrency int    `json:"maxDownloadConcurrency"`
+	MaxUploadConcurrency   int    `json:"maxUploadConcurrency"`
+}
+
+func main() {
+	if len(os.Args) < 2 {
+		log.Fatalf("missing configuration argument")
+	}
+
 	var cfg Config
-	if err := json.NewDecoder(file).Decode(&cfg); err != nil {
-		log.Fatalf("failed to decode config: %v", err)
+	if err := json.Unmarshal([]byte(os.Args[1]), &cfg); err != nil {
+		log.Fatalf("failed to parse configuration: %v", err)
 	}
 
-	// Ensure a valid max concurrency value.
-	if cfg.MaxConcurrency <= 0 {
-		cfg.MaxConcurrency = 1
-	}
+	ctx := context.Background()
 
-	// Set up the AWS S3 client using the provided auth method.
-	var awsCfg aws.Config
-	ctx := context.TODO()
-	if strings.ToLower(cfg.Auth.Method) == "explicit" {
-		if cfg.Auth.Region == "" {
-			log.Fatal("region is required for explicit auth")
-		}
-		// Use explicit credentials.
-		awsCfg, err = config.LoadDefaultConfig(ctx,
-			config.WithRegion(cfg.Auth.Region),
-			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.Auth.AccessKey, cfg.Auth.SecretKey, cfg.Auth.SessionToken)),
-		)
-		if err != nil {
-			log.Fatalf("failed to load aws config: %v", err)
-		}
-	} else {
-		// Use the default credentials chain.
-		awsCfg, err = config.LoadDefaultConfig(ctx)
-		if err != nil {
-			log.Fatalf("failed to load aws config: %v", err)
-		}
+	// Load AWS configuration (using the default credential chain).
+	awsCfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		log.Fatalf("failed to load AWS config: %v", err)
 	}
-
 	s3Client := s3.NewFromConfig(awsCfg)
 
-	// Use a buffered channel as a semaphore to limit concurrency.
-	sem := make(chan struct{}, cfg.MaxConcurrency)
-	var wg sync.WaitGroup
-	errCh := make(chan error, len(cfg.Files))
-
-	// Launch a goroutine for each file download.
-	for _, file := range cfg.Files {
-		wg.Add(1)
-		sem <- struct{}{} // acquire a slot
-		go func(file S3File) {
-			defer wg.Done()
-			defer func() { <-sem }() // release the slot when done
-			if err := downloadAndValidate(ctx, s3Client, file); err != nil {
-				errCh <- err
-			}
-		}(file)
+	// Initialize our S3Service with the S3 client and concurrency limit semaphores.
+	service := &S3Service{
+		client:      s3Client,
+		downloadSem: make(chan struct{}, cfg.MaxDownloadConcurrency),
+		uploadSem:   make(chan struct{}, cfg.MaxUploadConcurrency),
 	}
 
-	// Wait for all downloads to complete.
-	wg.Wait()
-	close(errCh)
-
-	// Check for any errors.
-	if len(errCh) > 0 {
-		for err := range errCh {
-			log.Printf("Error: %v", err)
-		}
-		log.Fatal("one or more downloads failed")
+	// Set up the JSON-RPC server.
+	s := rpc.NewServer()
+	s.RegisterCodec(gorillajson.NewCodec(), "application/json")
+	if err := s.RegisterService(service, "S3Service"); err != nil {
+		log.Fatalf("failed to register service: %v", err)
 	}
 
-	log.Println("All downloads completed successfully.")
+	// Use a Unix domain socket as our named pipe.
+	os.Remove(cfg.SocketPath) // remove previous socket if exists
+	l, err := net.Listen("unix", cfg.SocketPath)
+	if err != nil {
+		log.Fatalf("failed to listen on unix socket: %v", err)
+	}
+	defer l.Close()
+
+	http.Handle("/rpc", s)
+	log.Printf("RPC server is listening on unix socket %s", cfg.SocketPath)
+	log.Fatal(http.Serve(l, nil))
 }
