@@ -1,0 +1,12 @@
+{
+  "packageManager": "yarn@4.6.0",
+  "scripts": {
+    "test": "yarn workspaces foreach --all --parallel --topological-dev --interlaced --verbose run test"
+  },
+  "workspaces": {
+    "packages": [
+      "package",
+      "otherpackage"
+    ]
+  }
+}

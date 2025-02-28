@@ -1,5 +1,7 @@
 node_modules
-.yarn/cache
-.yarn/install-state.gz
+**/.yarn/cache
+install-state.gz
 bundles
 dist
+.pnp.*
+output

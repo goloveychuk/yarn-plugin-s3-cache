@@ -1,0 +1,9 @@
+{
+    "name": "otherpackage",
+    "version": "1.0.0",
+    "dependencies": {
+        "lodash": "^3.0.0",
+        "mimic-response": "^1.0.0",
+        "webpack-cli": "^5.1.4"
+    }
+}
