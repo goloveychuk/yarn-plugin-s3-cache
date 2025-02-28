@@ -117,7 +117,11 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 	computed := hex.EncodeToString(hasher.Sum(nil))
 	if computed != req.Checksum {
 		defer os.Remove(req.OutputPath)
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", req.Checksum, computed)
+		_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+		if err != nil {
+			return fmt.Errorf("checksum mismatch: %s, expected %s, got %s, failed to delete object: %w", key, req.Checksum, computed, err)
+		}
+		return fmt.Errorf("checksum mismatch: %s, expected %s, got %s", key, req.Checksum, computed)
 	}
 
 	resp.Message = "Download successful"
