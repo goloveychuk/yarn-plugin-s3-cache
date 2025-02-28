@@ -142,6 +142,17 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 	defer file.Close()
 
 	ctx := context.Background()
+	headInput := &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+	_, err = s.client.HeadObject(ctx, headInput)
+	if err == nil {
+		resp.Message = "Object already exists, skipping upload"
+		return nil
+	} else if !strings.Contains(err.Error(), "NotFound") {
+		return fmt.Errorf("failed to check if object exists: %w", err)
+	}
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),

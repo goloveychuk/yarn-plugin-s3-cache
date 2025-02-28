@@ -5,3 +5,4 @@ bundles
 dist
 .pnp.*
 output
+**/*.secrets.json

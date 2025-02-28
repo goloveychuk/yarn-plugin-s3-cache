@@ -4,15 +4,12 @@ import {
   structUtils,
   Report,
   miscUtils,
-  SettingsType,
-  ConfigurationValueMap,
   LocatorHash,
 } from '@yarnpkg/core';
 import * as path from 'path'
-import {spawnSync} from 'child_process'
-import {Readable} from 'stream'
+import * as fs from 'fs'
 //@ts-expect-error
-import {getExecFileName} from '../utils.mjs'
+import { getExecFileName } from '../utils.mjs'
 import { Client } from './client';
 interface File {
   s3Path: string;
@@ -36,17 +33,7 @@ declare module '@yarnpkg/core' {
   }
 }
 
-interface Options {
-  shouldFetch: boolean;
-  shouldUpload: boolean;
-  bucket: string;
-  chunkCount: number;
-  profile: string | undefined;
-  filepath: string | undefined;
-  region: string | null;
-}
 
-type GetOptions = (input: ConfigurationValueMap['s3CacheConfig']) => Options;
 
 const CHECKSUM_REGEX = /^(?:(?<cacheKey>(?<cacheVersion>[0-9]+)(?<cacheSpec>.*))\/)?(?<hash>.*)$/;
 
@@ -68,60 +55,7 @@ function splitChecksumComponents(checksum: string) {
 }
 
 
-const defaultGetOptions: GetOptions = (configInput) => {
-  //@ts-expect-error
-  if (typeof GET_S3_CACHE_OPTIONS === 'function') {
-    //@ts-expect-error
-    return GET_S3_CACHE_OPTIONS(configInput);
-  }
-  return {
-    region: configInput.get('region'),
-    profile: configInput.get('profile'),
-    shouldFetch: process.env.S3_CACHE_SHOULD_FETCH === 'true',
-    shouldUpload: process.env.S3_CACHE_SHOULD_UPLOAD === 'true',
-    bucket: configInput.get('bucket'),
-    chunkCount: configInput.get('chunkCount'),
-    filepath: configInput.get('filepath'),
-  };
-};
-
 const plugin: Plugin<Hooks> = {
-  configuration: {
-    s3CacheConfig: {
-      type: SettingsType.SHAPE,
-      description: 'S3 cache config',
-      properties: {
-        bucket: {
-          default: 'yarn-s3-cache',
-          description: `s3 bucket name`,
-          type: SettingsType.STRING,
-        },
-        chunkCount: {
-          description: `number of chunks, basically concurrency (one file limit is 100mbit), default 10`,
-          default: 10,
-          type: SettingsType.NUMBER,
-        },
-        region: {
-          description: `aws region`,
-          isNullable: true,
-          default: null,
-          type: SettingsType.STRING,
-        },
-        profile: {
-          description: `aws profile`,
-          isNullable: true,
-          default: null,
-          type: SettingsType.STRING,
-        },
-        filepath: {
-          description: `aws creds file path`,
-          isNullable: true,
-          default: null,
-          type: SettingsType.STRING,
-        },
-      },
-    },
-  },
   hooks: {
     // afterAllInstalled: () => {
     //   console.log(`What a great install, am I right?`);
@@ -133,7 +67,24 @@ const plugin: Plugin<Hooks> = {
     // }
     validateProject: (project) => {
       const origFetch = project.fetchEverything.bind(project);
+
+
+
       project.fetchEverything = async (opts) => {
+        const execPath = path.join(__dirname, getExecFileName())
+        const userConfig = await project.loadUserConfig();
+        if (!userConfig?.s3CacheConfig) {
+          return origFetch(opts);
+        }
+
+        const client = new Client(execPath, {
+          maxUploadConcurrency: 500,
+          maxDownloadConcurrency: 500,
+          ...userConfig.s3CacheConfig,
+        })
+
+        const bucket = userConfig.s3CacheConfig.bucket
+
         const files: FetchInput['files'] = []
         let locatorHashes = Array.from(
           new Set(
@@ -149,6 +100,8 @@ const plugin: Plugin<Hooks> = {
             ]),
           ),
         );
+        let filesToNotUpload = new Set<string>()
+
         for (const locatorHash of locatorHashes) {
           const pkg = project.storedPackages.get(locatorHash);
 
@@ -161,32 +114,48 @@ const plugin: Plugin<Hooks> = {
           }
 
           const outputFile = opts.cache.getLocatorPath(pkg, checksum);
+          if (fs.existsSync(outputFile)) {
+            // filesToNotUpload.add(outputFile)
+            continue
+          }
           const basename = path.basename(outputFile);
           files.push({
-            s3Path: `s3://fdsfsadfksakjdfjklasdjklfsajkldsfsd/${basename}`,
+            s3Path: `s3://${bucket}/${basename}`,
             checksum: splitChecksumComponents(checksum).hash,
-            outputPath: opts.cache.getLocatorPath(pkg, checksum),
+            outputPath: outputFile,
           })
         }
 
-        const execPath = path.join(__dirname, getExecFileName())
-
-        const client = new Client(execPath, {
-          awsAccessKeyId: 'minioadmin',
-          awsRegion: 'us-east-1',
-          awsSecretAccessKey: 'minioadmin',
-        })
-        await  client.start()
-
-        let pr = []
-        for (const f of files) {
-          pr.push(client.downloadFile(f).then(console.log))
-        }
-        await Promise.all(pr)
-
-
-        await origFetch(opts)
+        await client.start()
+        await opts.report.startTimerPromise(
+          `Downloading cache from s3: ${files.length} files`,
+          async () => {
+            await Promise.all(files.map(async (f) => {
+              const res = await client.downloadFile(f);
+              if (res.result) {
+                filesToNotUpload.add(f.outputPath)
+              }
+            }))
+          }
+        )
+        const result = await origFetch(opts)
+        const filesToUpload = Array.from(opts.cache.markedFiles).filter(
+          (f) => !filesToNotUpload.has(f) && fs.existsSync(f), //filtering conditional packages
+        );
+        await opts.report.startTimerPromise(
+          `Uploading cache to s3: ${filesToUpload.length} files`,
+          async () => {
+            await Promise.all(filesToUpload.map(async (f) => {
+              const basename = path.basename(f);
+              await client.uploadFile({
+                s3Path: `s3://${bucket}/${basename}`,
+                inputPath: f,
+              });
+            }))
+          }
+        );
         await client.stop()
+        return result
         //   const options = getOptions(project.configuration.get('s3CacheConfig'));
 
         //   if (!options.shouldFetch && !options.shouldUpload) {
@@ -227,19 +196,7 @@ const plugin: Plugin<Hooks> = {
         //     );
         //   }
 
-        //   const result = await origFetch(opts);
-        //   if (options.shouldUpload) {
-        //     const filesToUpload = Array.from(opts.cache.markedFiles).filter(
-        //       (f) => fs.existsSync(f), //filtering conditional packages
-        //     );
-        //     await opts.report.startTimerPromise(
-        //       `Uploading cache to s3`,
-        //       async () => {
-        //         await upload(config, filesToUpload, opts.report);
-        //       },
-        //     );
-        //   }
-        //   return result;
+
       };
     },
   },
