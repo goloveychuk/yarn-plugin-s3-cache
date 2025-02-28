@@ -55,7 +55,7 @@ const build = async (conf) => {
 if (fs.existsSync(outputDir)) {
   fs.rmSync(outputDir, { recursive: true });
 }
-fs.mkdirSync(outputDir);
+fs.mkdirSync(outputDir, {recursive: true});
 
 if (dev) {
   const { arch, platform } = getArchAndPlatform();
