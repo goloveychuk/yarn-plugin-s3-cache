@@ -1,11 +1,15 @@
-name: NodeJS with Webpack
+name: Publish
 
-on: push
-# on:
-#   push:
-#     branches: [ "master" ]
-#   pull_request:
-#     branches: [ "master" ]
+permissions:
+  id-token: write
+  attestations: write
+
+# on: push
+on:
+  push:
+    branches: [ "master" ] 
+  pull_request:
+    branches: [ "master" ] #todo
 
 jobs:
   build:
@@ -23,13 +27,15 @@ jobs:
         run: |
           yarn install --immutable && \
           yarn build
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+
+      - name: Upload build artifact
+        id: upload
+        uses: actions/upload-artifact@v4
         with:
-          draft: false
-          prerelease: false
-#           tag_name: tag-name-${{ github.ref }}
-#           name: Release ${{ github.ref }}
-          files: bundles/@yarnpkg/plugin-s3-cache.js
+          path: bundles/@yarnpkg/*
+          name: artifact.zip
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: artifact.zip
+          subject-digest: sha256:${{ steps.upload.outputs.artifact-digest }}
