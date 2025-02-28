@@ -1,6 +1,13 @@
 It's optimized for ci workflow, for big project on machines with fast s3 networking.
-Archives are uploaded in tar chunks, which is waste of space because of dublicates, but decreases download time.
-For 2gb pnp cache and c5.9xlarge instance, yarn fetch phase is <6s.
+
+Install:
+1) open https://github.com/goloveychuk/yarn-plugin-s3-cache/actions/workflows/publish.yml
+2) find latest release
+3) check attestations
+4) download archive
+5) unzip to .yarn/plugins
+6) add plugin entry to .yarnrc
+7) remove architectures you won't run on.
 
 Usage:
 0) yarn plugin import https://github.com/goloveychuk/yarn-plugin-s3-cache/releases/latest/download/plugin-s3-cache.js
