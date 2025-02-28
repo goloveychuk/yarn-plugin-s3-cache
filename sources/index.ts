@@ -127,21 +127,30 @@ const plugin: Plugin<Hooks> = {
         }
 
         await client.start()
+
+        const downloadProgress = Report.progressViaCounter(files.length);
+        const reportedDownloadProgress = opts.report.reportProgress(downloadProgress);
         await opts.report.startTimerPromise(
           `Downloading cache from s3: ${files.length} files`,
           async () => {
             await Promise.all(files.map(async (f) => {
               const res = await client.downloadFile(f);
+              downloadProgress.tick()
               if (res.result) {
                 filesToNotUpload.add(f.outputPath)
               }
             }))
           }
         )
+        reportedDownloadProgress.stop()
+
         const result = await origFetch(opts)
         const filesToUpload = Array.from(opts.cache.markedFiles).filter(
           (f) => !filesToNotUpload.has(f) && fs.existsSync(f), //filtering conditional packages
         );
+
+        const uploadProgress = Report.progressViaCounter(filesToUpload.length);
+        const reportedUploadProgress = opts.report.reportProgress(uploadProgress);
         await opts.report.startTimerPromise(
           `Uploading cache to s3: ${filesToUpload.length} files`,
           async () => {
@@ -151,9 +160,12 @@ const plugin: Plugin<Hooks> = {
                 s3Path: `s3://${bucket}/${basename}`,
                 inputPath: f,
               });
+              uploadProgress.tick()
             }))
           }
         );
+        reportedUploadProgress.stop()
+        
         await client.stop()
         return result
         //   const options = getOptions(project.configuration.get('s3CacheConfig'));
