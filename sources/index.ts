@@ -6,6 +6,7 @@ import {
   miscUtils,
   LocatorHash,
 } from '@yarnpkg/core';
+// import {} from '@yarnpkg/plugin-pnp'
 import * as path from 'path'
 import * as fs from 'fs'
 //@ts-expect-error
@@ -57,6 +58,10 @@ function splitChecksumComponents(checksum: string) {
 
 const plugin: Plugin<Hooks> = {
   hooks: {
+    // async wrapScriptExecution(executor, project, locator, scriptName, extra) {
+    //   console.log(extra, scriptName, locator.name)
+    //   return executor;
+    // },
     // afterAllInstalled: () => {
     //   console.log(`What a great install, am I right?`);
     // },
@@ -73,7 +78,7 @@ const plugin: Plugin<Hooks> = {
       project.fetchEverything = async (opts) => {
         const execPath = path.join(__dirname, getExecFileName())
         const userConfig = await project.loadUserConfig();
-        if (!userConfig?.s3CacheConfig) {
+        if (!userConfig?.s3CacheConfig || !fs.existsSync(execPath)) {
           return origFetch(opts);
         }
 
@@ -165,7 +170,7 @@ const plugin: Plugin<Hooks> = {
           }
         );
         reportedUploadProgress.stop()
-        
+
         await client.stop()
         return result
         //   const options = getOptions(project.configuration.get('s3CacheConfig'));
