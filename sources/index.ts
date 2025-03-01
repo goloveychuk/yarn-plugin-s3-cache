@@ -5,7 +5,10 @@ import {
   Report,
   miscUtils,
   LocatorHash,
+  Cache,
 } from '@yarnpkg/core';
+import { FakeFS, LazyFS, NodeFS, PortablePath, ppath, AliasFS } from '@yarnpkg/fslib';
+
 // import {} from '@yarnpkg/plugin-pnp'
 import * as path from 'path'
 import * as fs from 'fs'
@@ -74,7 +77,6 @@ const plugin: Plugin<Hooks> = {
       const origFetch = project.fetchEverything.bind(project);
 
 
-
       project.fetchEverything = async (opts) => {
         const execPath = path.join(__dirname, getExecFileName())
         const userConfig = await project.loadUserConfig();
@@ -87,93 +89,131 @@ const plugin: Plugin<Hooks> = {
           maxDownloadConcurrency: 500,
           ...userConfig.s3CacheConfig,
         })
+        await client.start()
+
 
         const bucket = userConfig.s3CacheConfig.bucket
 
-        const files: FetchInput['files'] = []
-        let locatorHashes = Array.from(
-          new Set(
-            miscUtils.sortMap(project.storedResolutions.values(), [
-              (locatorHash: LocatorHash) => {
-                const pkg = project.storedPackages.get(locatorHash);
-
-                if (!pkg)
-                  throw new Error(`Assertion failed: The locator should have been registered`);
-
-                return structUtils.stringifyLocator(pkg);
-              },
-            ]),
-          ),
-        );
-        let filesToNotUpload = new Set<string>()
-
-        for (const locatorHash of locatorHashes) {
-          const pkg = project.storedPackages.get(locatorHash);
-
-          if (!pkg) {
-            throw new Error(`Package not found for locator ${locatorHash}`);
+        const cache = opts.cache;
+        const origFetchPackageFromCache = cache.fetchPackageFromCache.bind(cache);
+        cache.fetchPackageFromCache = async (locator, expectedChecksum, opts) => {
+          if (!expectedChecksum) {
+            return origFetchPackageFromCache(locator, expectedChecksum, opts)
           }
-          const checksum = project.storedChecksums.get(locatorHash)
-          if (!checksum) {
-            continue
-          }
+          const filePath = cache.getLocatorPath(locator, expectedChecksum)
+          const hash = splitChecksumComponents(expectedChecksum).hash
+          const res = await client.downloadFile({
+            s3Path: `s3://${bucket}/${hash}.zip`,
+            checksum: hash,
+            outputPath: filePath,
+          });
+          if (res.result) {
+            opts.onHit?.()
+            const aliasFs = new AliasFS(filePath, { baseFs: new NodeFS(), pathUtils: ppath });
+            const releaseFs = () => {
 
-          const outputFile = opts.cache.getLocatorPath(pkg, checksum);
-          if (fs.existsSync(outputFile)) {
-            // filesToNotUpload.add(outputFile)
-            continue
+            };
+            cache.markedFiles.add(filePath);
+            return [aliasFs, releaseFs, expectedChecksum];
           }
-          const basename = path.basename(outputFile);
-          files.push({
-            s3Path: `s3://${bucket}/${basename}`,
-            checksum: splitChecksumComponents(checksum).hash,
-            outputPath: outputFile,
-          })
+          const result = await origFetchPackageFromCache(locator, expectedChecksum, opts)
+          if (fs.existsSync(filePath)) {
+            await client.uploadFile({
+              s3Path: `s3://${bucket}/${hash}.zip`,
+              inputPath: filePath,
+            })
+          }
+          return result
         }
+        try {
+          return await origFetch(opts)
+        } finally {
+          cache.fetchPackageFromCache = origFetchPackageFromCache
+          await client.stop()
+        }
+        // const files: FetchInput['files'] = []
+        // let locatorHashes = Array.from(
+        //   new Set(
+        //     miscUtils.sortMap(project.storedResolutions.values(), [
+        //       (locatorHash: LocatorHash) => {
+        //         const pkg = project.storedPackages.get(locatorHash);
 
-        await client.start()
+        //         if (!pkg)
+        //           throw new Error(`Assertion failed: The locator should have been registered`);
 
-        const downloadProgress = Report.progressViaCounter(files.length);
-        const reportedDownloadProgress = opts.report.reportProgress(downloadProgress);
-        await opts.report.startTimerPromise(
-          `Downloading cache from s3: ${files.length} files`,
-          async () => {
-            await Promise.all(files.map(async (f) => {
-              const res = await client.downloadFile(f);
-              downloadProgress.tick()
-              if (res.result) {
-                filesToNotUpload.add(f.outputPath)
-              }
-            }))
-          }
-        )
-        reportedDownloadProgress.stop()
+        //         return structUtils.stringifyLocator(pkg);
+        //       },
+        //     ]),
+        //   ),
+        // );
+        // let filesToNotUpload = new Set<string>()
 
-        const result = await origFetch(opts)
-        const filesToUpload = Array.from(opts.cache.markedFiles).filter(
-          (f) => !filesToNotUpload.has(f) && fs.existsSync(f), //filtering conditional packages
-        );
+        // for (const locatorHash of locatorHashes) {
+        //   const pkg = project.storedPackages.get(locatorHash);
 
-        const uploadProgress = Report.progressViaCounter(filesToUpload.length);
-        const reportedUploadProgress = opts.report.reportProgress(uploadProgress);
-        await opts.report.startTimerPromise(
-          `Uploading cache to s3: ${filesToUpload.length} files`,
-          async () => {
-            await Promise.all(filesToUpload.map(async (f) => {
-              const basename = path.basename(f);
-              await client.uploadFile({
-                s3Path: `s3://${bucket}/${basename}`,
-                inputPath: f,
-              });
-              uploadProgress.tick()
-            }))
-          }
-        );
-        reportedUploadProgress.stop()
+        //   if (!pkg) {
+        //     throw new Error(`Package not found for locator ${locatorHash}`);
+        //   }
+        //   const checksum = project.storedChecksums.get(locatorHash)
+        //   if (!checksum) {
+        //     continue
+        //   }
 
-        await client.stop()
-        return result
-        //   const options = getOptions(project.configuration.get('s3CacheConfig'));
+        //   const outputFile = opts.cache.getLocatorPath(pkg, checksum);
+        //   if (fs.existsSync(outputFile)) {
+        //     // filesToNotUpload.add(outputFile)
+        //     continue
+        //   }
+        //   const basename = path.basename(outputFile);
+        //   files.push({
+        //     s3Path: `s3://${bucket}/${basename}`,
+        //     checksum: splitChecksumComponents(checksum).hash,
+        //     outputPath: outputFile,
+        //   })
+        // }
+
+
+        // const downloadProgress = Report.progressViaCounter(files.length);
+        // const reportedDownloadProgress = opts.report.reportProgress(downloadProgress);
+        // await opts.report.startTimerPromise(
+        //   `Downloading cache from s3: ${files.length} files`,
+        //   async () => {
+        //     await Promise.all(files.map(async (f) => {
+        //       const res = await client.downloadFile(f);
+        //       downloadProgress.tick()
+        //       if (res.result) {
+        //         filesToNotUpload.add(f.outputPath)
+        //       }
+        //     }))
+        //   }
+        // )
+        // reportedDownloadProgress.stop()
+
+        // const result = await origFetch(opts)
+        // const filesToUpload = Array.from(opts.cache.markedFiles).filter(
+        //   (f) => !filesToNotUpload.has(f) && fs.existsSync(f), //filtering conditional packages
+        // );
+
+        // const uploadProgress = Report.progressViaCounter(filesToUpload.length);
+        // const reportedUploadProgress = opts.report.reportProgress(uploadProgress);
+        // await opts.report.startTimerPromise(
+        //   `Uploading cache to s3: ${filesToUpload.length} files`,
+        //   async () => {
+        //     await Promise.all(filesToUpload.map(async (f) => {
+        //       const basename = path.basename(f);
+        //       await client.uploadFile({
+        //         s3Path: `s3://${bucket}/${basename}`,
+        //         inputPath: f,
+        //       });
+        //       uploadProgress.tick()
+        //     }))
+        //   }
+        // );
+        // reportedUploadProgress.stop()
+
+        // await client.stop()
+        // return result
+        // //   const options = getOptions(project.configuration.get('s3CacheConfig'));
 
         //   if (!options.shouldFetch && !options.shouldUpload) {
         //     return origFetch(opts);
