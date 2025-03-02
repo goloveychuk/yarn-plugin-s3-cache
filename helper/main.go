@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -63,6 +64,11 @@ type PingRequest struct {
 
 type PingResponse struct {
 	Message string `json:"message"`
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // parseS3Path splits an S3 URL (s3://bucket/key) into bucket and key.
@@ -222,8 +228,18 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 		}
 	}
 	if req.UnTar {
-		if err := untar(req.OutputPath, reader); err != nil {
+		tempPath := fmt.Sprintf("%s.%d.tmp", req.OutputPath, time.Now().Unix())
+		if err := untar(tempPath, reader); err != nil {
 			return fmt.Errorf("failed to untar stream: %w", err)
+		}
+
+		if fileExists(req.OutputPath) {
+			if err := os.Rename(req.OutputPath, tempPath+".bak"); err != nil {
+				return fmt.Errorf("failed to rename temp file: %w", err)
+			}
+		}
+		if err := os.Rename(tempPath, req.OutputPath); err != nil {
+			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
 	} else {
 		file, err := os.Create(req.OutputPath)
@@ -232,7 +248,6 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 		}
 		defer file.Close()
 
-		// Set up a SHA‑512 hasher.
 		hasher := sha512.New()
 		writer := io.MultiWriter(file, hasher)
 		if _, err := io.Copy(writer, reader); err != nil {
@@ -249,7 +264,6 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 			return fmt.Errorf("checksum mismatch: %s, expected %s, got %s", key, req.Checksum, computed)
 		}
 	}
-	// Use MultiWriter to write data to both the file and the hasher.
 
 	resp.Message = "Download successful"
 	return nil
