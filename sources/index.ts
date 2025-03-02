@@ -96,10 +96,10 @@ const plugin: Plugin<Hooks> = {
       const origFetch = project.fetchEverything.bind(project);
       const execPath = path.join(__dirname, getExecFileName())
       const userConfig = await project.loadUserConfig();
-      if (!userConfig?.s3CacheConfig || !fs.existsSync(execPath)) {
+      if (!userConfig?.getS3CacheConfig || !fs.existsSync(execPath)) {
         return null
       }
-      const pluginData = userConfig.s3CacheConfig as {
+      const pluginData = await userConfig.getS3CacheConfig() as {
         maxDownloadConcurrency?: number;
         maxUploadConcurrency?: number;
         awsRegion: string;

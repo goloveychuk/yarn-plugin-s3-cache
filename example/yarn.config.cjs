@@ -1,5 +1,3 @@
 module.exports = {
-    s3CacheConfig: {
-        ...require('./.secrets.json')
-    }
+    getS3CacheConfig: () => require('./.secrets.json')
 }
