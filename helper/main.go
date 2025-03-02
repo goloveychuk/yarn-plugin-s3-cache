@@ -7,6 +7,7 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -22,6 +23,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/gorilla/rpc"
 	gorillajson "github.com/gorilla/rpc/json"
 )
@@ -213,7 +215,8 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 	}
 	out, err := s.client.GetObject(ctx, input)
 	if err != nil {
-		if err.Error() == "NoSuchKey" {
+		noSuchKeyErr := &types.NoSuchKey{}
+		if errors.As(err, &noSuchKeyErr) {
 			return nil
 		}
 		return fmt.Errorf("failed to get object: %w", err)
@@ -291,8 +294,11 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 	_, err = s.client.HeadObject(ctx, headInput)
 	if err == nil {
 		return nil
-	} else if !strings.Contains(err.Error(), "NotFound") {
-		return fmt.Errorf("failed to check if object exists: %w", err)
+	} else {
+		notFoundErr := &types.NotFound{}
+		if !errors.As(err, &notFoundErr) {
+			return fmt.Errorf("failed to check if object exists: %w", err)
+		}
 	}
 	var body io.Reader
 

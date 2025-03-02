@@ -105,9 +105,12 @@ export class Client {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            const data = await response.json();
+            const data = await response.json() as RpcResponse<R> ;
             // console.log(`Response for ${method}:`, data);
-            return data as RpcResponse<R>
+            if (data.error) {
+                console.error(`Error for ${method}:`, data.error);
+            }
+            return data;
         } catch (error) {
             if (method !== 'S3Service.Ping') {
                 console.error(`Error calling ${method}:`, error);
