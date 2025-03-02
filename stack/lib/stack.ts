@@ -15,7 +15,12 @@ export class PnpCacheStack extends cdk.Stack {
 
     const user = new iam.User(this, 'pnpCacheAuthedUser', {});
 
-    bucket.grantReadWrite(user);
+
+    user.addToPolicy(new iam.PolicyStatement({
+      actions: ['s3:GetObject', 's3:PutObject', 's3:AbortMultipartUpload',],
+      resources: [`${bucket.bucketArn}/*`],
+      effect: iam.Effect.ALLOW,
+    }));
 
     const accessKey = new iam.CfnAccessKey(this, 'myAccessKey', {
       userName: user.userName,

@@ -24,6 +24,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithy "github.com/aws/smithy-go"
+
 	"github.com/gorilla/rpc"
 	gorillajson "github.com/gorilla/rpc/json"
 )
@@ -71,6 +73,23 @@ type PingResponse struct {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func isNotFoundError(err error) bool {
+	noSuchKeyErr := &types.NoSuchKey{}
+	if errors.As(err, &noSuchKeyErr) {
+		return true
+	}
+	notFoundError := &types.NotFound{}
+	if errors.As(err, &notFoundError) {
+		return true
+	}
+	var ae smithy.APIError
+	if (errors.As(err, &ae)) && (ae.ErrorCode() == "AccessDenied" && strings.Contains(ae.ErrorMessage(), "is not authorized to perform: s3:ListBucket")) {
+		// fmt.Println(err)
+		return true
+	}
+	return false
 }
 
 // parseS3Path splits an S3 URL (s3://bucket/key) into bucket and key.
@@ -215,8 +234,7 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 	}
 	out, err := s.client.GetObject(ctx, input)
 	if err != nil {
-		noSuchKeyErr := &types.NoSuchKey{}
-		if errors.As(err, &noSuchKeyErr) {
+		if isNotFoundError(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to get object: %w", err)
@@ -287,18 +305,13 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 
 	ctx := context.Background()
 
-	headInput := &s3.HeadObjectInput{
+	headOut, _ := s.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-	}
-	_, err = s.client.HeadObject(ctx, headInput)
-	if err == nil {
+	})
+	if headOut != nil {
+		// do not override
 		return nil
-	} else {
-		notFoundErr := &types.NotFound{}
-		if !errors.As(err, &notFoundErr) {
-			return fmt.Errorf("failed to check if object exists: %w", err)
-		}
 	}
 	var body io.Reader
 
