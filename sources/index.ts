@@ -6,15 +6,24 @@ import {
   miscUtils,
   LocatorHash,
   Cache,
+  Linker,
+  LinkOptions,
+  Locator,
+  Project,
+  BuildDirective,
+  MessageName,
 } from '@yarnpkg/core';
+
 import { FakeFS, LazyFS, NodeFS, PortablePath, ppath, AliasFS } from '@yarnpkg/fslib';
 
-// import {} from '@yarnpkg/plugin-pnp'
+import { PnpInstaller } from '@yarnpkg/plugin-pnp'
+// import {PnpLooseInstaller} from '@yarnpkg/plugin-nm'
 import * as path from 'path'
 import * as fs from 'fs'
 //@ts-expect-error
 import { getExecFileName } from '../utils.mjs'
 import { Client } from './client';
+import { createHash } from 'crypto';
 interface File {
   s3Path: string;
   checksum: string
@@ -58,8 +67,28 @@ function splitChecksumComponents(checksum: string) {
   };
 }
 
+const cacheLinker = Symbol('cacheLinker')
+class CacheLinker implements Linker {
+  private [cacheLinker] = true
+  private otherLinkers?: Array<Linker> = []
+  private getOtherLinkers(project: Project) {
+    if (!this.otherLinkers) {
+      this.otherLinkers = project.configuration.getLinkers().filter(linker => !(cacheLinker in linker))
+    }
+    return this.otherLinkers
+  }
+  findPackageLocation(locator: Locator, opts: LinkOptions): Promise<PortablePath> {
+
+  }
+
+}
+
+
 
 const plugin: Plugin<Hooks> = {
+  linkers: [
+    // CacheLinker,
+  ],
   hooks: {
     // async wrapScriptExecution(executor, project, locator, scriptName, extra) {
     //   console.log(extra, scriptName, locator.name)
@@ -73,27 +102,25 @@ const plugin: Plugin<Hooks> = {
     //   dep.range = 'asd$'+dep.range;
     //   return dep
     // }
-    validateProject: (project) => {
+    validateProject: async (project) => {
       const origFetch = project.fetchEverything.bind(project);
+      const execPath = path.join(__dirname, getExecFileName())
+      const userConfig = await project.loadUserConfig();
+      if (!userConfig?.s3CacheConfig || !fs.existsSync(execPath)) {
+        return null
+      }
+      const client = new Client(execPath, {
+        maxUploadConcurrency: 500,
+        maxDownloadConcurrency: 500,
+        ...userConfig.s3CacheConfig,
+      })
+      await client.start()
 
+      // await client.stop()//todo call
+
+      const bucket = userConfig.s3CacheConfig.bucket
 
       project.fetchEverything = async (opts) => {
-        const execPath = path.join(__dirname, getExecFileName())
-        const userConfig = await project.loadUserConfig();
-        if (!userConfig?.s3CacheConfig || !fs.existsSync(execPath)) {
-          return origFetch(opts);
-        }
-
-        const client = new Client(execPath, {
-          maxUploadConcurrency: 500,
-          maxDownloadConcurrency: 500,
-          ...userConfig.s3CacheConfig,
-        })
-        await client.start()
-
-
-        const bucket = userConfig.s3CacheConfig.bucket
-
         const cache = opts.cache;
         const origFetchPackageFromCache = cache.fetchPackageFromCache.bind(cache);
         cache.fetchPackageFromCache = async (locator, expectedChecksum, opts) => {
@@ -101,9 +128,18 @@ const plugin: Plugin<Hooks> = {
             return origFetchPackageFromCache(locator, expectedChecksum, opts)
           }
           const filePath = cache.getLocatorPath(locator, expectedChecksum)
-          const hash = splitChecksumComponents(expectedChecksum).hash
+          if (fs.existsSync(filePath)) {
+            // for reinstalls (local)
+            return origFetchPackageFromCache(locator, expectedChecksum, opts)
+          }
+
+          const hash = splitChecksumComponents(expectedChecksum).hash;
+          const compress = project.configuration.get(`compressionLevel`) === 0
+
+          const s3Path = `s3://${bucket}/${hash}.zip${compress ? '' : '.gz'}`
+
           const res = await client.downloadFile({
-            s3Path: `s3://${bucket}/${hash}.zip`,
+            s3Path,
             checksum: hash,
             outputPath: filePath,
           });
@@ -118,9 +154,11 @@ const plugin: Plugin<Hooks> = {
           }
           const result = await origFetchPackageFromCache(locator, expectedChecksum, opts)
           if (fs.existsSync(filePath)) {
+            // conditional packages are not always installed
             await client.uploadFile({
-              s3Path: `s3://${bucket}/${hash}.zip`,
+              s3Path,
               inputPath: filePath,
+              compress,
             })
           }
           return result
@@ -129,7 +167,6 @@ const plugin: Plugin<Hooks> = {
           return await origFetch(opts)
         } finally {
           cache.fetchPackageFromCache = origFetchPackageFromCache
-          await client.stop()
         }
         // const files: FetchInput['files'] = []
         // let locatorHashes = Array.from(
@@ -255,6 +292,119 @@ const plugin: Plugin<Hooks> = {
 
 
       };
+
+      const origLink = project.linkEverything.bind(project);
+      project.linkEverything = async (opts) => {
+        const globalHashGenerator = createHash(`sha512`);
+        globalHashGenerator.update(process.versions.node);
+        globalHashGenerator.update(process.platform);
+        globalHashGenerator.update(process.arch);
+        // globalHashGenerator.update(projectname); TODO!!
+
+        // await project.configuration.triggerHook(hooks => {
+        //   return hooks.globalHashGeneration;
+        // }, project, (data: Buffer | string) => {
+        //   globalHashGenerator.update(`\0`);
+        //   globalHashGenerator.update(data);
+        // });
+
+        const globalHash = globalHashGenerator.digest(`hex`);
+        const packageHashMap = new Map<LocatorHash, string>();
+
+        // We'll use this function is order to compute a hash for each package
+        // that exposes a build directive. If the hash changes compared to the
+        // previous run, the package is rebuilt. This has the advantage of making
+        // the rebuilds much more predictable than before, and to give us the tools
+        // later to improve this further by explaining *why* a rebuild happened.
+
+
+        const getBaseHash = (locator: Locator) => {
+          let hash = packageHashMap.get(locator.locatorHash);
+          if (typeof hash !== `undefined`)
+            return hash;
+
+          const pkg = project.storedPackages.get(locator.locatorHash);
+          if (typeof pkg === `undefined`)
+            throw new Error(`Assertion failed: The package should have been registered`);
+
+          const builder = createHash(`sha512`);
+          builder.update(locator.locatorHash);
+
+          // To avoid the case where one dependency depends on itself somehow
+          packageHashMap.set(locator.locatorHash, `<recursive>`);
+
+          for (const descriptor of pkg.dependencies.values()) {
+            const resolution = project.storedResolutions.get(descriptor.descriptorHash);
+            if (typeof resolution === `undefined`)
+              throw new Error(`Assertion failed: The resolution (${structUtils.prettyDescriptor(project.configuration, descriptor)}) should have been registered`);
+
+            const dependency = project.storedPackages.get(resolution);
+            if (typeof dependency === `undefined`)
+              throw new Error(`Assertion failed: The package should have been registered`);
+
+            builder.update(getBaseHash(dependency));
+          }
+
+          hash = builder.digest(`hex`);
+          packageHashMap.set(locator.locatorHash, hash);
+
+          return hash;
+        };
+
+        const getBuildHash = (locator: Locator, buildLocations: Array<PortablePath>) => {
+          const builder = createHash(`sha512`);
+
+          builder.update(globalHash);
+          builder.update(getBaseHash(locator));
+
+          for (const location of buildLocations)
+            builder.update(location);
+
+          return builder.digest(`hex`);
+        };
+
+        const installsToUpload: Array<{hash: string, path: PortablePath, locatorHash: LocatorHash}> = []
+
+        // for (const cls of [PnpInstaller, ])
+        const origInstall = PnpInstaller.prototype.installPackage;
+
+        PnpInstaller.prototype.installPackage = async function (pkg, fetcher, fetchOptions) {
+          const installResult = await origInstall.call(this, pkg, fetcher, fetchOptions)
+          if (installResult.buildRequest && !installResult.buildRequest.skipped) {
+            const buildHash = getBuildHash(pkg, [installResult.packageLocation]);
+            console.log(buildHash)
+            const downloadRes = await client.downloadFile({
+              s3Path: `s3://${bucket}/${buildHash}.tar.gz`,
+              checksum: buildHash,
+              outputPath: installResult.packageLocation,
+              toUnarchive: true, //useless unarchieve + override
+            })  
+            if (downloadRes.result) {
+              return {
+                // 26c8a1885192003c3929dba0f5b29355bd33453fb9842066c3dfb1d68a8b133f69ca54a32b66fa6bb8288bb29077e8555fd47fdc3a1b53f30e5a37ea3f10ee2d
+                packageLocation: installResult.packageLocation,
+                buildRequest: {skipped: true, explain: (report) => {
+                  report.reportInfoOnce(MessageName.BUILD_DISABLED, `${structUtils.prettyLocator(project.configuration, pkg)} lists build scripts, but its build has been explicitly disabled through configuration.`)
+                }},
+              }
+            } else {
+              installsToUpload.push({hash: buildHash, path: installResult.packageLocation, locatorHash: pkg.locatorHash})
+            }
+          }
+          return installResult
+        }
+        // todo find where to await client.stop()
+        const result = await origLink(opts)
+        await Promise.all(installsToUpload.map(async install => {
+          if (!project.storedBuildState.get(install.locatorHash)) {
+            // installation failed
+            return
+          }
+          console.log(install.hash)
+          console.log(await client.uploadFile({compress: true, createTar:true, inputPath: install.path, s3Path: `s3://${bucket}/${install.hash}.tar.gz`}))
+        }))
+        return result
+      }
     },
   },
 }

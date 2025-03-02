@@ -122,6 +122,6 @@ export class Client {
         }
     }
     downloadFile = this.createRpcCall<[{ s3Path: string, outputPath: string, checksum: string }], {}>('S3Service.Download')
-    uploadFile = this.createRpcCall<[{ s3Path: string, inputPath: string }], {}>('S3Service.Upload')
+    uploadFile = this.createRpcCall<[{ s3Path: string, inputPath: string, compress?: boolean, createTar?: boolean }], {}>('S3Service.Upload')
 }
 

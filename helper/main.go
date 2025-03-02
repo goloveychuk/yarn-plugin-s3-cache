@@ -1,6 +1,8 @@
 package main
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
 	"crypto/sha512"
 	"encoding/hex"
@@ -11,11 +13,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gorilla/rpc"
 	gorillajson "github.com/gorilla/rpc/json"
@@ -30,9 +34,10 @@ type S3Service struct {
 
 // DownloadRequest is the input for the Download method.
 type DownloadRequest struct {
-	S3Path     string `json:"s3Path"`     // e.g. "s3://bucket/key"
-	OutputPath string `json:"outputPath"` // local file path to save the object
-	Checksum   string `json:"checksum"`   // expected SHA-512 checksum (hex encoded)
+	S3Path      string `json:"s3Path"`     // e.g. "s3://bucket/key"
+	OutputPath  string `json:"outputPath"` // local file path to save the object
+	Checksum    string `json:"checksum"`   // expected SHA-512 checksum (hex encoded)
+	ToUnarchive bool   `json:"toUnarchive"`
 }
 
 // DownloadResponse is the output from the Download method.
@@ -44,6 +49,8 @@ type DownloadResponse struct {
 type UploadRequest struct {
 	S3Path    string `json:"s3Path"`    // e.g. "s3://bucket/key"
 	InputPath string `json:"inputPath"` // local file path to read from
+	CreateTar bool   `json:"createTar"`
+	Compress  bool   `json:"compress"`
 }
 
 // UploadResponse is the output from the Upload method.
@@ -68,6 +75,80 @@ func parseS3Path(s3Path string) (bucket, key string, err error) {
 		return "", "", fmt.Errorf("invalid s3 path, missing key: %s", s3Path)
 	}
 	return parts[0], parts[1], nil
+}
+
+// compressStream compresses the given io.Reader and returns an io.Reader for the compressed data.
+func compressStream(reader io.Reader) io.Reader {
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		gw := gzip.NewWriter(pw)
+		defer gw.Close()
+
+		if _, err := io.Copy(gw, reader); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+	}()
+	return pr
+}
+
+// createTarStream creates a tar stream from the specified directory.
+func createTarStream(dirPath string) (io.Reader, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		tw := tar.NewWriter(pw)
+
+		err := filepath.Walk(dirPath, func(file string, fi os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			header, err := tar.FileInfoHeader(fi, fi.Name())
+			if err != nil {
+				return err
+			}
+
+			header.Name, err = filepath.Rel(dirPath, file)
+			if err != nil {
+				return err
+			}
+
+			if err := tw.WriteHeader(header); err != nil {
+				return err
+			}
+
+			if !fi.Mode().IsRegular() {
+				return nil
+			}
+
+			f, err := os.Open(file)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+
+			if _, err := io.Copy(tw, f); err != nil {
+				return err
+			}
+
+			return nil
+		})
+
+		tw.Close()
+		pw.CloseWithError(err)
+	}()
+
+	return compressStream(pr), nil
+}
+
+// compressFile compresses the given file and returns an io.Reader for the compressed data.
+func compressFile(filePath string) (io.Reader, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return compressStream(file), nil
 }
 
 func (s *S3Service) Ping(r *http.Request, req *PingRequest, resp *PingResponse) error {
@@ -139,13 +220,8 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 		return err
 	}
 
-	file, err := os.Open(req.InputPath)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
 	ctx := context.Background()
+
 	headInput := &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -157,12 +233,35 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 	} else if !strings.Contains(err.Error(), "NotFound") {
 		return fmt.Errorf("failed to check if object exists: %w", err)
 	}
+	var body io.Reader
+
+	if req.CreateTar {
+		tarStream, err := createTarStream(req.InputPath)
+		if err != nil {
+			return fmt.Errorf("failed to create tar.gz stream: %w", err)
+		}
+		body = tarStream
+	} else {
+		file, err := os.Open(req.InputPath)
+		if err != nil {
+			return fmt.Errorf("failed to open file: %w", err)
+		}
+		defer file.Close()
+		body = file
+	}
+
+	if req.Compress {
+		body = compressStream(body)
+	}
+
+	//todo // WARN Response has no supported checksum. Not validating response payload. add hash
+	uploader := manager.NewUploader(s.client)
 	input := &s3.PutObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
-		Body:   file,
+		Body:   body,
 	}
-	_, err = s.client.PutObject(ctx, input)
+	_, err = uploader.Upload(ctx, input)
 	if err != nil {
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
