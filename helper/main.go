@@ -44,7 +44,7 @@ type DownloadRequest struct {
 
 // DownloadResponse is the output from the Download method.
 type DownloadResponse struct {
-	Message string `json:"message"`
+	Downloaded bool `json:"downloaded"`
 }
 
 // UploadRequest is the input for the Upload method.
@@ -57,7 +57,7 @@ type UploadRequest struct {
 
 // UploadResponse is the output from the Upload method.
 type UploadResponse struct {
-	Message string `json:"message"`
+	Uploaded bool `json:"uploaded"`
 }
 type PingRequest struct {
 }
@@ -213,10 +213,12 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 	}
 	out, err := s.client.GetObject(ctx, input)
 	if err != nil {
+		if err.Error() == "NoSuchKey" {
+			return nil
+		}
 		return fmt.Errorf("failed to get object: %w", err)
 	}
 	defer out.Body.Close()
-
 	// Create (or overwrite) the local file.
 
 	var reader io.Reader = out.Body
@@ -265,7 +267,7 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 		}
 	}
 
-	resp.Message = "Download successful"
+	resp.Downloaded = true
 	return nil
 }
 
@@ -288,7 +290,6 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 	}
 	_, err = s.client.HeadObject(ctx, headInput)
 	if err == nil {
-		resp.Message = "Object already exists, skipping upload"
 		return nil
 	} else if !strings.Contains(err.Error(), "NotFound") {
 		return fmt.Errorf("failed to check if object exists: %w", err)
@@ -325,7 +326,7 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 		return fmt.Errorf("failed to upload object: %w", err)
 	}
 
-	resp.Message = "Upload successful"
+	resp.Uploaded = true
 	return nil
 }
 

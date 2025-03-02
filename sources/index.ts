@@ -146,7 +146,7 @@ const plugin: Plugin<Hooks> = {
             decompress: compress,
             untar: false,
           });
-          if (res.result) {
+          if (res.result?.downloaded === true) {
             opts.onHit?.()
             const aliasFs = new AliasFS(filePath, { baseFs: new NodeFS(), pathUtils: ppath });
             const releaseFs = () => {
@@ -385,8 +385,7 @@ const plugin: Plugin<Hooks> = {
               untar: true, //useless unarchieve 
               decompress: true,
             })
-            console.log(downloadRes)
-            if (downloadRes.result) {
+            if (downloadRes.result?.downloaded === true) {
               return {
                 packageLocation: installResult.packageLocation,
                 buildRequest: {
@@ -409,13 +408,12 @@ const plugin: Plugin<Hooks> = {
             // installation failed
             return
           }
-          const uploadRes = await client.uploadFile({
+           await client.uploadFile({
             compress: true,
             createTar: true,
             inputPath: install.inputPath,
             s3Path: install.s3Path,
           })
-          console.log(uploadRes)
         }))
         return result
       }

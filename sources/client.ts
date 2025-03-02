@@ -109,7 +109,9 @@ export class Client {
             // console.log(`Response for ${method}:`, data);
             return data as RpcResponse<R>
         } catch (error) {
-            // console.error(`Error calling ${method}:`, error);
+            if (method !== 'S3Service.Ping') {
+                console.error(`Error calling ${method}:`, error);
+            }
             throw error;
         }
     }
@@ -119,7 +121,7 @@ export class Client {
             return await this.rpcCall<T, R>(method, ...params);
         }
     }
-    downloadFile = this.createRpcCall<[{ s3Path: string, outputPath: string, checksum: string, untar: boolean, decompress: boolean }], {}>('S3Service.Download')
-    uploadFile = this.createRpcCall<[{ s3Path: string, inputPath: string, compress: boolean, createTar: boolean }], {}>('S3Service.Upload')
+    downloadFile = this.createRpcCall<[{ s3Path: string, outputPath: string, checksum: string, untar: boolean, decompress: boolean }], {downloaded: boolean}>('S3Service.Download')
+    uploadFile = this.createRpcCall<[{ s3Path: string, inputPath: string, compress: boolean, createTar: boolean }], {uploaded: boolean}>('S3Service.Upload')
 }
 
