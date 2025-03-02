@@ -19,8 +19,8 @@ interface RpcResponse<T> {
     id: number;
 }
 export interface Config {
-    maxDownloadConcurrency?: number;
-    maxUploadConcurrency?: number;
+    maxDownloadConcurrency: number;
+    maxUploadConcurrency: number;
     awsRegion: string;
     awsAccessKeyId: string;
     awsSecretAccessKey: string;
@@ -38,8 +38,6 @@ export class Client {
 
     async start() {
         const conf = {
-            maxDownloadConcurrency: 500,
-            maxUploadConcurrency: 500,
             ...this.config,
             socketPath: this.pipePath,
         }

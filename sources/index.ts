@@ -99,10 +99,19 @@ const plugin: Plugin<Hooks> = {
       if (!userConfig?.s3CacheConfig || !fs.existsSync(execPath)) {
         return null
       }
+      const pluginData = userConfig.s3CacheConfig as {
+        maxDownloadConcurrency?: number;
+        maxUploadConcurrency?: number;
+        awsRegion: string;
+        awsAccessKeyId: string;
+        awsSecretAccessKey: string;
+        bucket: string
+        globalHash?: string[]
+      }
       const client = new Client(execPath, {
         maxUploadConcurrency: 500,
         maxDownloadConcurrency: 500,
-        ...userConfig.s3CacheConfig,
+        ...pluginData,
       })
       await client.start();
 
@@ -110,7 +119,7 @@ const plugin: Plugin<Hooks> = {
         await client.stop()
       }
 
-      const bucket = userConfig.s3CacheConfig.bucket
+      const bucket = pluginData.bucket
 
       project.fetchEverything = async (opts) => {
         const cache = opts.cache;
@@ -294,14 +303,15 @@ const plugin: Plugin<Hooks> = {
         globalHashGenerator.update(process.versions.node);
         globalHashGenerator.update(process.platform);
         globalHashGenerator.update(process.arch);
-        // globalHashGenerator.update(projectname); TODO!!
-
-        // await project.configuration.triggerHook(hooks => {
-        //   return hooks.globalHashGeneration;
-        // }, project, (data: Buffer | string) => {
-        //   globalHashGenerator.update(`\0`);
-        //   globalHashGenerator.update(data);
-        // });
+        for (const hash of pluginData.globalHash ?? []) {
+          globalHashGenerator.update(hash);
+        }
+        await project.configuration.triggerHook(hooks => {
+          return hooks.globalHashGeneration;
+        }, project, (data: Buffer | string) => {
+          globalHashGenerator.update(`\0`);
+          globalHashGenerator.update(data);
+        });
 
         const globalHash = globalHashGenerator.digest(`hex`);
         const packageHashMap = new Map<LocatorHash, string>();
@@ -378,10 +388,9 @@ const plugin: Plugin<Hooks> = {
             console.log(downloadRes)
             if (downloadRes.result) {
               return {
-                // 26c8a1885192003c3929dba0f5b29355bd33453fb9842066c3dfb1d68a8b133f69ca54a32b66fa6bb8288bb29077e8555fd47fdc3a1b53f30e5a37ea3f10ee2d
                 packageLocation: installResult.packageLocation,
                 buildRequest: {
-                  skipped: true, 
+                  skipped: true,
                   explain: (report) => {
                     report.reportInfoOnce(MessageName.BUILD_DISABLED, `${structUtils.prettyLocator(project.configuration, pkg)} cache from s3 cache.`)
                   }
