@@ -67,23 +67,7 @@ function splitChecksumComponents(checksum: string) {
   };
 }
 
-const cacheLinker = Symbol('cacheLinker')
-class CacheLinker implements Linker {
-  private [cacheLinker] = true
-  private otherLinkers?: Array<Linker> = []
-  private getOtherLinkers(project: Project) {
-    if (!this.otherLinkers) {
-      this.otherLinkers = project.configuration.getLinkers().filter(linker => !(cacheLinker in linker))
-    }
-    return this.otherLinkers
-  }
-  findPackageLocation(locator: Locator, opts: LinkOptions): Promise<PortablePath> {
-
-  }
-
-}
-
-
+const stopSymbol = Symbol('stopClient');
 
 const plugin: Plugin<Hooks> = {
   linkers: [
@@ -102,6 +86,12 @@ const plugin: Plugin<Hooks> = {
     //   dep.range = 'asd$'+dep.range;
     //   return dep
     // }
+    afterAllInstalled: async (project) => {
+      if (stopSymbol in project) {
+        await (project as any)[stopSymbol]();
+        delete (project as any)[stopSymbol];
+      }
+    },
     validateProject: async (project) => {
       const origFetch = project.fetchEverything.bind(project);
       const execPath = path.join(__dirname, getExecFileName())
@@ -114,9 +104,11 @@ const plugin: Plugin<Hooks> = {
         maxDownloadConcurrency: 500,
         ...userConfig.s3CacheConfig,
       })
-      await client.start()
+      await client.start();
 
-      // await client.stop()//todo call
+      (project as any)[stopSymbol] = async () => {
+        await client.stop()
+      }
 
       const bucket = userConfig.s3CacheConfig.bucket
 
@@ -142,6 +134,8 @@ const plugin: Plugin<Hooks> = {
             s3Path,
             checksum: hash,
             outputPath: filePath,
+            decompress: compress,
+            untar: false,
           });
           if (res.result) {
             opts.onHit?.()
@@ -159,6 +153,7 @@ const plugin: Plugin<Hooks> = {
               s3Path,
               inputPath: filePath,
               compress,
+              createTar: false
             })
           }
           return result
@@ -377,7 +372,8 @@ const plugin: Plugin<Hooks> = {
               s3Path: `s3://${bucket}/${buildHash}.tar.gz`,
               checksum: buildHash,
               outputPath: installResult.packageLocation,
-              toUnarchive: true, //useless unarchieve + override
+              untar: true, //useless unarchieve 
+              decompress: true,
             })  
             if (downloadRes.result) {
               return {
@@ -393,7 +389,7 @@ const plugin: Plugin<Hooks> = {
           }
           return installResult
         }
-        // todo find where to await client.stop()
+        
         const result = await origLink(opts)
         await Promise.all(installsToUpload.map(async install => {
           if (!project.storedBuildState.get(install.locatorHash)) {
