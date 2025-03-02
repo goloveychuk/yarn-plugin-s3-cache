@@ -127,7 +127,7 @@ func untar(dirPath string, reader io.Reader) error {
 			continue
 		}
 
-		file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, info.Mode())
+		file, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode())
 		if err != nil {
 			return err
 		}
@@ -242,7 +242,7 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
 	} else {
-		file, err := os.Create(req.OutputPath)
+		file, err := os.OpenFile(req.OutputPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 		if err != nil {
 			return fmt.Errorf("failed to create file: %w", err)
 		}
