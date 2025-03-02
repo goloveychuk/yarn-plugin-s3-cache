@@ -34,10 +34,11 @@ type S3Service struct {
 
 // DownloadRequest is the input for the Download method.
 type DownloadRequest struct {
-	S3Path      string `json:"s3Path"`     // e.g. "s3://bucket/key"
-	OutputPath  string `json:"outputPath"` // local file path to save the object
-	Checksum    string `json:"checksum"`   // expected SHA-512 checksum (hex encoded)
-	ToUnarchive bool   `json:"toUnarchive"`
+	S3Path     string `json:"s3Path"`     // e.g. "s3://bucket/key"
+	OutputPath string `json:"outputPath"` // local file path to save the object
+	Checksum   string `json:"checksum"`   // expected SHA-512 checksum (hex encoded)
+	Decompress bool   `json:"decompress"`
+	UnTar      bool   `json:"untar"`
 }
 
 // DownloadResponse is the output from the Download method.
@@ -93,6 +94,46 @@ func compressStream(reader io.Reader) io.Reader {
 	return pr
 }
 
+// decompressStream decompresses the given gzip-compressed io.Reader and returns an io.Reader for the decompressed data.
+func decompressStream(reader io.Reader) (io.Reader, error) {
+	gr, err := gzip.NewReader(reader)
+	return gr, err
+}
+
+func untar(dirPath string, reader io.Reader) error {
+	tr := tar.NewReader(reader)
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dirPath, header.Name)
+		info := header.FileInfo()
+
+		if info.IsDir() {
+			if err := os.MkdirAll(target, info.Mode()); err != nil {
+				return err
+			}
+			continue
+		}
+
+		file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, info.Mode())
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		if _, err := io.Copy(file, tr); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // createTarStream creates a tar stream from the specified directory.
 func createTarStream(dirPath string) (io.Reader, error) {
 	pr, pw := io.Pipe()
@@ -139,16 +180,7 @@ func createTarStream(dirPath string) (io.Reader, error) {
 		pw.CloseWithError(err)
 	}()
 
-	return compressStream(pr), nil
-}
-
-// compressFile compresses the given file and returns an io.Reader for the compressed data.
-func compressFile(filePath string) (io.Reader, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return nil, err
-	}
-	return compressStream(file), nil
+	return pr, nil
 }
 
 func (s *S3Service) Ping(r *http.Request, req *PingRequest, resp *PingResponse) error {
@@ -180,30 +212,44 @@ func (s *S3Service) Download(r *http.Request, req *DownloadRequest, resp *Downlo
 	defer out.Body.Close()
 
 	// Create (or overwrite) the local file.
-	file, err := os.Create(req.OutputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
 
-	// Set up a SHA‑512 hasher.
-	hasher := sha512.New()
+	var reader io.Reader = out.Body
 
-	// Use MultiWriter to write data to both the file and the hasher.
-	writer := io.MultiWriter(file, hasher)
-	if _, err := io.Copy(writer, out.Body); err != nil {
-		return fmt.Errorf("failed to download file: %w", err)
-	}
-
-	computed := hex.EncodeToString(hasher.Sum(nil))
-	if computed != req.Checksum {
-		defer os.Remove(req.OutputPath)
-		_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+	if req.Decompress {
+		reader, err = decompressStream(reader)
 		if err != nil {
-			return fmt.Errorf("checksum mismatch: %s, expected %s, got %s, failed to delete object: %w", key, req.Checksum, computed, err)
+			return fmt.Errorf("failed to decompress stream: %w", err)
 		}
-		return fmt.Errorf("checksum mismatch: %s, expected %s, got %s", key, req.Checksum, computed)
 	}
+	if req.UnTar {
+		if err := untar(req.OutputPath, reader); err != nil {
+			return fmt.Errorf("failed to untar stream: %w", err)
+		}
+	} else {
+		file, err := os.Create(req.OutputPath)
+		if err != nil {
+			return fmt.Errorf("failed to create file: %w", err)
+		}
+		defer file.Close()
+
+		// Set up a SHA‑512 hasher.
+		hasher := sha512.New()
+		writer := io.MultiWriter(file, hasher)
+		if _, err := io.Copy(writer, reader); err != nil {
+			return fmt.Errorf("failed to download file: %w", err)
+		}
+
+		computed := hex.EncodeToString(hasher.Sum(nil))
+		if computed != req.Checksum {
+			defer os.Remove(req.OutputPath)
+			_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+			if err != nil {
+				return fmt.Errorf("checksum mismatch: %s, expected %s, got %s, failed to delete object: %w", key, req.Checksum, computed, err)
+			}
+			return fmt.Errorf("checksum mismatch: %s, expected %s, got %s", key, req.Checksum, computed)
+		}
+	}
+	// Use MultiWriter to write data to both the file and the hasher.
 
 	resp.Message = "Download successful"
 	return nil
@@ -249,7 +295,6 @@ func (s *S3Service) Upload(r *http.Request, req *UploadRequest, resp *UploadResp
 		defer file.Close()
 		body = file
 	}
-
 	if req.Compress {
 		body = compressStream(body)
 	}

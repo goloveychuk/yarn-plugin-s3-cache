@@ -358,7 +358,7 @@ const plugin: Plugin<Hooks> = {
           return builder.digest(`hex`);
         };
 
-        const installsToUpload: Array<{hash: string, path: PortablePath, locatorHash: LocatorHash}> = []
+        const installsToUpload: Array<{ s3Path: string, inputPath: PortablePath, locatorHash: LocatorHash }> = []
 
         // for (const cls of [PnpInstaller, ])
         const origInstall = PnpInstaller.prototype.installPackage;
@@ -367,37 +367,46 @@ const plugin: Plugin<Hooks> = {
           const installResult = await origInstall.call(this, pkg, fetcher, fetchOptions)
           if (installResult.buildRequest && !installResult.buildRequest.skipped) {
             const buildHash = getBuildHash(pkg, [installResult.packageLocation]);
-            console.log(buildHash)
+            const s3Path = `s3://${bucket}/${buildHash}.tar.gz`
             const downloadRes = await client.downloadFile({
-              s3Path: `s3://${bucket}/${buildHash}.tar.gz`,
-              checksum: buildHash,
+              s3Path,
+              checksum: '',
               outputPath: installResult.packageLocation,
               untar: true, //useless unarchieve 
               decompress: true,
-            })  
+            })
+            console.log(downloadRes)
             if (downloadRes.result) {
               return {
                 // 26c8a1885192003c3929dba0f5b29355bd33453fb9842066c3dfb1d68a8b133f69ca54a32b66fa6bb8288bb29077e8555fd47fdc3a1b53f30e5a37ea3f10ee2d
                 packageLocation: installResult.packageLocation,
-                buildRequest: {skipped: true, explain: (report) => {
-                  report.reportInfoOnce(MessageName.BUILD_DISABLED, `${structUtils.prettyLocator(project.configuration, pkg)} lists build scripts, but its build has been explicitly disabled through configuration.`)
-                }},
+                buildRequest: {
+                  skipped: true, 
+                  explain: (report) => {
+                    report.reportInfoOnce(MessageName.BUILD_DISABLED, `${structUtils.prettyLocator(project.configuration, pkg)} cache from s3 cache.`)
+                  }
+                },
               }
             } else {
-              installsToUpload.push({hash: buildHash, path: installResult.packageLocation, locatorHash: pkg.locatorHash})
+              installsToUpload.push({ s3Path, inputPath: installResult.packageLocation, locatorHash: pkg.locatorHash })
             }
           }
           return installResult
         }
-        
+
         const result = await origLink(opts)
         await Promise.all(installsToUpload.map(async install => {
           if (!project.storedBuildState.get(install.locatorHash)) {
             // installation failed
             return
           }
-          console.log(install.hash)
-          console.log(await client.uploadFile({compress: true, createTar:true, inputPath: install.path, s3Path: `s3://${bucket}/${install.hash}.tar.gz`}))
+          const uploadRes = await client.uploadFile({
+            compress: true,
+            createTar: true,
+            inputPath: install.inputPath,
+            s3Path: install.s3Path,
+          })
+          console.log(uploadRes)
         }))
         return result
       }
