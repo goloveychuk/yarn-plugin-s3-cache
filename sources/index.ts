@@ -156,8 +156,8 @@ const plugin: Plugin<Hooks> = {
             return [aliasFs, releaseFs, expectedChecksum];
           }
           const result = await origFetchPackageFromCache(locator, expectedChecksum, opts)
+          // conditional packages are not always installed
           if (fs.existsSync(filePath)) {
-            // conditional packages are not always installed
             await client.uploadFile({
               s3Path,
               inputPath: filePath,
@@ -378,6 +378,7 @@ const plugin: Plugin<Hooks> = {
           if (installResult.buildRequest && !installResult.buildRequest.skipped) {
             const buildHash = getBuildHash(pkg, [installResult.packageLocation]);
             const s3Path = `s3://${bucket}/${buildHash}.tar.gz`
+            // TODO for incremental should add checks if build is already done (cached)
             const downloadRes = await client.downloadFile({
               s3Path,
               checksum: '',
@@ -408,7 +409,7 @@ const plugin: Plugin<Hooks> = {
             // installation failed
             return
           }
-           await client.uploadFile({
+          await client.uploadFile({
             compress: true,
             createTar: true,
             inputPath: install.inputPath,
