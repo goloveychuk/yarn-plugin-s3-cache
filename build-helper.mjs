@@ -2,14 +2,14 @@ import { execa } from 'execa';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { getArchAndPlatform } from './utils.mjs';
+import { getArchAndPlatform, getExecFileName } from './utils.mjs';
 import {pathToFileURL, resolve} from 'url'
 
 const dev = process.env.DEVELOPMENT === 'true';
 
 let targets = [
-  // ['darwin', 'amd64'],
-  // ['darwin', 'arm64'],
+  ['darwin', 'amd64'],
+  ['darwin', 'arm64'],
   ['linux', 'amd64'],
   ['linux', 'arm64'],
 ];
@@ -35,7 +35,7 @@ if (!PREFIX || dev) {
 
 const build = async (conf) => {
   const [platform, arch] = conf;
-  const name = `helper-${platform}-${arch}`;
+  const name = getExecFileName({ platform, arch });
   const outFile = path.join(outputDir, `${name}`);
   await execa('go', ['build', '-ldflags', "-w -s", '-o', outFile, ], {
     cwd: projectDir,

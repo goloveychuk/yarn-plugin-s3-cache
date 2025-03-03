@@ -13,7 +13,10 @@ export function getArchAndPlatform() {
   return { arch, platform };
 }
 
-export function getExecFileName() {
-  const { arch, platform } = getArchAndPlatform();
-  return `helper-${platform}-${arch}`;
+export function getExecFileName({ arch, platform }) {
+  return `plugin-s3-cache.helper-${platform}-${arch}`;
+}
+
+export function getExecFileNameForCurrentPlatform() {
+  return getExecFileName(getArchAndPlatform)
 }

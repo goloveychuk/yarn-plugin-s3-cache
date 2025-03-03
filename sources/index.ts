@@ -2,26 +2,20 @@ import {
   Hooks,
   Plugin,
   structUtils,
-  Report,
   miscUtils,
   LocatorHash,
-  Cache,
-  Linker,
-  LinkOptions,
   Locator,
-  Project,
-  BuildDirective,
   MessageName,
 } from '@yarnpkg/core';
 
-import { FakeFS, LazyFS, NodeFS, PortablePath, ppath, AliasFS } from '@yarnpkg/fslib';
+import { NodeFS, PortablePath, ppath, AliasFS } from '@yarnpkg/fslib';
 
 import { PnpInstaller } from '@yarnpkg/plugin-pnp'
 // import {PnpLooseInstaller} from '@yarnpkg/plugin-nm'
 import * as path from 'path'
 import * as fs from 'fs'
 //@ts-expect-error
-import { getExecFileName } from '../utils.mjs'
+import { getExecFileNameForCurrentPlatform } from '../utils.mjs'
 import { Client } from './client';
 import { createHash } from 'crypto';
 interface File {
@@ -94,7 +88,7 @@ const plugin: Plugin<Hooks> = {
     },
     validateProject: async (project) => {
       const origFetch = project.fetchEverything.bind(project);
-      const execPath = path.join(__dirname, getExecFileName())
+      const execPath = path.join(__dirname, getExecFileNameForCurrentPlatform())
       const userConfig = await project.loadUserConfig();
       if (!userConfig?.getS3CacheConfig || !fs.existsSync(execPath)) {
         return null

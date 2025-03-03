@@ -6,3 +6,4 @@ dist
 .pnp.*
 output
 **/*.secrets.json
+installer.mjs

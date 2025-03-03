@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "target": "ES2019",
+    "strict": true,
+    "moduleResolution": "nodenext",
+    "skipLibCheck": true,
+    "outDir": ".",
+    "lib": [
+      "ES2019"
+    ]
+  },
+  "files": [
+    "installer.mts"
+  ]
+}

@@ -1,20 +1,29 @@
 {
   "name": "yarn-plugin-s3-cache",
-  "main": "./sources/index.ts",
+  "bin": "./installer.mjs",
   "workspaces": [
     "stack"
   ],
-  "dependencies": {
+  "files": [
+    "installer.js",
+    "bundles/@yarnpkg"
+  ],
+  "devDependencies": {
     "@types/node": "^18.0.0",
     "@yarnpkg/builder": "^4.0.0",
     "@yarnpkg/cli": "^4.0.0",
     "@yarnpkg/core": "^4.0.0",
-    "execa": "^8.0.1",
     "node-fetch": "^3.3.2",
     "typescript": "^5.0.0"
   },
+  "dependencies": {
+    "@inquirer/prompts": "^7.3.2",
+    "esbuild": "^0.25.0",
+    "execa": "^8.0.1"
+  },
   "scripts": {
-    "build": "node build-helper.mjs && tsc --noEmit && builder build plugin",
+    "watch": "tsc -p tsconfig.installer.json --watch",
+    "build": "tsc -p tsconfig.installer.json && node build-helper.mjs && tsc --noEmit && builder build plugin",
     "dev": "DEVELOPMENT=true node build-helper.mjs && builder build plugin --no-minify --source-map",
     "test": "cd example && yarn install && yarn test"
   },
