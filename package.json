@@ -5,6 +5,10 @@
   "workspaces": [
     "stack"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/goloveychuk/yarn-plugin-s3-cache.git"
+  },
   "files": [
     "installer.js",
     "template.mts",
