@@ -1,7 +1,7 @@
 {
   "name": "yarn-plugin-s3-cache",
   "bin": "./installer.mjs",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "workspaces": [
     "stack"
   ],

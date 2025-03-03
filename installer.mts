@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { checkbox, input } from '@inquirer/prompts'
 import * as path from 'path'
 import * as fs from 'fs';
