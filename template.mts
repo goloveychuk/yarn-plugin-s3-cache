@@ -1,6 +1,7 @@
 interface UserConfig {
     maxDownloadConcurrency?: number;
     maxUploadConcurrency?: number;
+    enable: boolean
     awsRegion: string;
     awsAccessKeyId: string;
     awsSecretAccessKey: string;
@@ -11,6 +12,7 @@ interface UserConfig {
 export default async(): Promise<UserConfig> => {
 
     return {
+        enable: true,
         bucket: 'my-bucket',
         awsRegion: 'us-east-1', 
 

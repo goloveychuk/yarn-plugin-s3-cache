@@ -35,6 +35,7 @@ declare module '@yarnpkg/core' {
 
 //sync with template
 interface UserConfig {
+  enable: boolean
   maxDownloadConcurrency?: number;
   maxUploadConcurrency?: number;
   awsRegion: string;
@@ -103,16 +104,13 @@ const plugin: Plugin<Hooks> = {
     },
     validateProject: async (project) => {
       const origFetch = project.fetchEverything.bind(project);
-      const userConfig = await project.loadUserConfig();
-      if (!userConfig?.getS3CacheConfig ) {
-        return null
-      }
+      const config = miscUtils.dynamicRequire('./plugin-s3-cache.config.cjs') as {default: () => Promise<UserConfig>}
       const execPath = await getHelperPath()
-      const pluginData = await userConfig.getS3CacheConfig() as UserConfig;
+      const userConfig = await config.default()
       const client = new Client(execPath, {
         maxUploadConcurrency: 500,
         maxDownloadConcurrency: 500,
-        ...pluginData,
+        ...userConfig,
       })
       await client.start();
 
@@ -120,7 +118,7 @@ const plugin: Plugin<Hooks> = {
         await client.stop()
       }
 
-      const bucket = pluginData.bucket
+      const bucket = userConfig.bucket
 
       project.fetchEverything = async (opts) => {
         const cache = opts.cache;
@@ -304,7 +302,7 @@ const plugin: Plugin<Hooks> = {
         globalHashGenerator.update(process.versions.node);
         globalHashGenerator.update(process.platform);
         globalHashGenerator.update(process.arch);
-        for (const hash of pluginData.globalHash ?? []) {
+        for (const hash of userConfig.globalHash ?? []) {
           globalHashGenerator.update(hash);
         }
         await project.configuration.triggerHook(hooks => {
