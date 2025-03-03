@@ -54,9 +54,15 @@ async function bundle(input: string) {
     return result.outputFiles[0].text
 }
 
+const defaultConfPath = 'cache-plugin.config.mts'
+if (!fs.existsSync(defaultConfPath)) {
+    await fs.promises.copyFile(path.join(dirname, 'template.mts'), defaultConfPath)
+}
+
 const confPath = await input({
-    message: 'Enter path to file which exports configuration object',
+    message: 'Enter path to file which exports config module. You should edit template',
     required: true,
+    default: defaultConfPath,
     transformer: (input, {isFinal}) => {
         if (isFinal) {
             return path.resolve(input)

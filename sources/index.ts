@@ -21,16 +21,6 @@ import { createHash } from 'crypto';
 //@ts-expect-error
 import metadata from '../bundles/@yarnpkg/metadata.json'
 
-interface File {
-  s3Path: string;
-  checksum: string
-  outputPath: string
-}
-interface FetchInput {
-  maxConcurrency: number;
-  files: Array<File>;
-}
-
 declare module '@yarnpkg/core' {
   interface ConfigurationValueMap {
     s3CacheConfig: miscUtils.ToMapValue<{
@@ -41,6 +31,17 @@ declare module '@yarnpkg/core' {
       filepath: string | null;
     }>;
   }
+}
+
+//sync with template
+interface UserConfig {
+  maxDownloadConcurrency?: number;
+  maxUploadConcurrency?: number;
+  awsRegion: string;
+  awsAccessKeyId: string;
+  awsSecretAccessKey: string;
+  bucket: string
+  globalHash?: string[]
 }
 
 async function getHelperPath() {
@@ -107,15 +108,7 @@ const plugin: Plugin<Hooks> = {
         return null
       }
       const execPath = await getHelperPath()
-      const pluginData = await userConfig.getS3CacheConfig() as {
-        maxDownloadConcurrency?: number;
-        maxUploadConcurrency?: number;
-        awsRegion: string;
-        awsAccessKeyId: string;
-        awsSecretAccessKey: string;
-        bucket: string
-        globalHash?: string[]
-      }
+      const pluginData = await userConfig.getS3CacheConfig() as UserConfig;
       const client = new Client(execPath, {
         maxUploadConcurrency: 500,
         maxDownloadConcurrency: 500,
