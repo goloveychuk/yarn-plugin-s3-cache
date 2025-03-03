@@ -18,6 +18,9 @@ import * as fs from 'fs'
 import { getExecFileNameForCurrentPlatform } from '../utils.mjs'
 import { Client } from './client';
 import { createHash } from 'crypto';
+//@ts-expect-error
+import metadata from '../bundles/@yarnpkg/metadata.json'
+
 interface File {
   s3Path: string;
   checksum: string
@@ -40,7 +43,18 @@ declare module '@yarnpkg/core' {
   }
 }
 
-
+async function getHelperPath() {
+  const name = getExecFileNameForCurrentPlatform()
+  const execPath = path.join(__dirname, name)
+  if (!fs.existsSync(execPath)) {
+    throw new Error(`Helper ${execPath} not found`)
+  }
+  const hash = createHash('sha512').update(fs.readFileSync(execPath)).digest('hex')
+  if (metadata[name].checksum !== hash) {
+    throw new Error(`Checksum mismatch for ${name}`)
+  }
+  return execPath
+}
 
 const CHECKSUM_REGEX = /^(?:(?<cacheKey>(?<cacheVersion>[0-9]+)(?<cacheSpec>.*))\/)?(?<hash>.*)$/;
 
@@ -88,11 +102,11 @@ const plugin: Plugin<Hooks> = {
     },
     validateProject: async (project) => {
       const origFetch = project.fetchEverything.bind(project);
-      const execPath = path.join(__dirname, getExecFileNameForCurrentPlatform())
       const userConfig = await project.loadUserConfig();
-      if (!userConfig?.getS3CacheConfig || !fs.existsSync(execPath)) {
+      if (!userConfig?.getS3CacheConfig ) {
         return null
       }
+      const execPath = await getHelperPath()
       const pluginData = await userConfig.getS3CacheConfig() as {
         maxDownloadConcurrency?: number;
         maxUploadConcurrency?: number;

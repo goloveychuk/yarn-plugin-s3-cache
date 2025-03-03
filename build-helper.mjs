@@ -48,7 +48,7 @@ const build = async (conf) => {
   const checksum = crypto.createHash('sha512');
   checksum.update(fs.readFileSync(outFile));
   const resFile =  new URL(name, PREFIX).href
-  return [name, {checksum: checksum.digest('hex'), path: resFile}];
+  return [name, {checksum: checksum.digest('hex')}];
 };
 
 
@@ -66,8 +66,8 @@ const metadatas = Object.fromEntries(
   await Promise.all(targets.map((t) => build(t))),
 );
 
-// console.log(JSON.stringify(metadatas, undefined, 4));
-// fs.writeFileSync(
-//   path.join(outputDir, 'metadata.json'),
-//   JSON.stringify(metadatas),
-// );
+console.log(JSON.stringify(metadatas, undefined, 4));
+fs.writeFileSync(
+  path.join(outputDir, 'metadata.json'),
+  JSON.stringify(metadatas),
+);

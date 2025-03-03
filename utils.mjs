@@ -18,5 +18,5 @@ export function getExecFileName({ arch, platform }) {
 }
 
 export function getExecFileNameForCurrentPlatform() {
-  return getExecFileName(getArchAndPlatform)
+  return getExecFileName(getArchAndPlatform())
 }
