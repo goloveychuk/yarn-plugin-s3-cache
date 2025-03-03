@@ -3920,7 +3920,7 @@ __metadata:
     node-fetch: "npm:^3.3.2"
     typescript: "npm:^5.0.0"
   bin:
-    yarn-plugin-s3-cache: ./installer.js
+    yarn-plugin-s3-cache: ./installer.mjs
   languageName: unknown
   linkType: soft
 
