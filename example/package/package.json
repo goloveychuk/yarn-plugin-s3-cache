@@ -4,7 +4,6 @@
         "decompress-response": "^6.0.0",
         "lodash": "^4.17.21",
         "mimic-response": "^1.0.0",
-        "node-sass": "^9.0.0",
         "otherpackage": "1.0.0",
         "react": "^16.0.0",
         "react-dom": "^18.2.0",
